@@ -181,7 +181,7 @@ you update the data to refresh the screenshots.
 | Demo | Description | Preview |
 |------|-------------|---------|
 | `arr_bar.png` | `bar` view for `list[number]` | ![arr_bar](src/edcraft_engine/code_visualizer/demo_outputs/arr_bar.png) |
-| `sort_frame_0~4.png` | Bubble-sort trace, each frame rendered as a bar chart | ![sort_frame_0](src/edcraft_engine/code_visualizer/demo_outputs/sort_frame_0.png) |
+| `sort_frame_1~4.png` | Bubble-sort trace, each frame rendered as a bar chart | ![sort_frame_1](src/edcraft_engine/code_visualizer/demo_outputs/sort_frame_1.png) ![sort_frame_2](src/edcraft_engine/code_visualizer/demo_outputs/sort_frame_2.png) ![sort_frame_3](src/edcraft_engine/code_visualizer/demo_outputs/sort_frame_3.png) ![sort_frame_4](src/edcraft_engine/code_visualizer/demo_outputs/sort_frame_4.png) |
 
 ### Miscellaneous notes
 
