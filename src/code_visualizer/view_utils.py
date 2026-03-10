@@ -28,7 +28,7 @@ _DATA_URI_SUFFIX = {
 _ASCII_TMP_ROOT = Path(tempfile.gettempdir())
 if any(ord(ch) > 127 for ch in str(_ASCII_TMP_ROOT)):
     _ASCII_TMP_ROOT = Path("/tmp")
-_IMAGE_CACHE_DIR = (_ASCII_TMP_ROOT / "edcraft_viz_images").resolve()
+_IMAGE_CACHE_DIR = (_ASCII_TMP_ROOT / "code_visualizer_images").resolve()
 _IMAGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 _TYPE_PATTERN_SAMPLE = 8
@@ -101,8 +101,14 @@ def _table_cell_text(x: Any) -> str:
 
 
 def _graphviz_array_block(value_cells: list[str], index_cells: list[str]) -> str:
-    value_row = "".join(value_cells)
-    index_row = "".join(index_cells)
+    if not value_cells:
+        value_row = '<td align="center">&nbsp;</td>'
+    else:
+        value_row = "".join(value_cells)
+    if not index_cells:
+        index_row = '<td align="center">&nbsp;</td>'
+    else:
+        index_row = "".join(index_cells)
     return (
         '<table border="0" cellborder="0" cellspacing="0">'
         '<tr><td>'

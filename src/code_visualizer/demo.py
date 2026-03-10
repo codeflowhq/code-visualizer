@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import shutil
 import tempfile
-from typing import Any
+from typing import Any, Mapping
 
 try:
     import numpy as np  # type: ignore
@@ -14,9 +14,131 @@ except Exception:  # pragma: no cover - optional
 
 from graphviz import Source
 
-from edcraft_engine.code_visualizer import config as viz_config
-from edcraft_engine.code_visualizer.graph_builder import visualize
-from edcraft_engine.code_visualizer.view_types import ViewKind
+from .config import VisualizerConfig, default_visualizer_config
+from .graph_builder import visualize
+from .models import ArtifactKind
+from .step_tracing import StepTracerUnavailableError, build_traces, trace_algorithm, visualize_trace
+from .view_types import ViewKind
+
+
+STEP_TRACER_SNIPPET = """
+data = [7, 3, 5, 1]
+for i in range(len(data)):
+    swapped = False
+    for j in range(0, len(data) - i - 1):
+        if data[j] > data[j + 1]:
+            data[j], data[j + 1] = data[j + 1], data[j]
+            swapped = True
+    if not swapped:
+        break
+"""
+STEP_TRACER_BFS_SNIPPET = """
+graph = {
+    "A": ["B", "C"],
+    "B": ["D"],
+    "C": ["E", "F"],
+    "D": [],
+    "E": [],
+    "F": [],
+}
+queue = ["A"]
+visited = []
+queue_state = queue[:]
+visited_nodes = visited[:]
+while queue:
+    node = queue.pop(0)
+    if node in visited:
+        continue
+    visited.append(node)
+    for neighbor in graph.get(node, []):
+        if neighbor not in visited and neighbor not in queue:
+            queue.append(neighbor)
+    queue_state = queue[:]
+    visited_nodes = visited[:]
+"""
+
+STEP_TRACER_DP_SNIPPET = """
+weights = [2, 3, 1, 4]
+target = 6
+dp = [[0] * (target + 1) for _ in range(len(weights) + 1)]
+dp_matrix = [row[:] for row in dp]
+for i, weight in enumerate(weights, start=1):
+    for capacity in range(target + 1):
+        dp[i][capacity] = dp[i - 1][capacity]
+    for capacity in range(weight, target + 1):
+        candidate = dp[i - 1][capacity - weight] + weight
+        if candidate > dp[i][capacity]:
+            dp[i][capacity] = candidate
+    dp_matrix = [row[:] for row in dp]
+"""
+
+
+STEP_TRACER_GRAPH_SNIPPET = """
+adjacency = {
+    "A": ["B", "C"],
+    "B": ["D"],
+    "C": ["E", "F"],
+    "D": [],
+    "E": [],
+    "F": [],
+}
+queue = ["A"]
+visited = []
+spanning_edges = []
+while queue:
+    node = queue.pop(0)
+    if node in visited:
+        continue
+    visited.append(node)
+    for neighbor in adjacency.get(node, []):
+        spanning_edges.append((node, neighbor))
+        if neighbor not in visited and neighbor not in queue:
+            queue.append(neighbor)
+    graph_snapshot = {
+        "nodes": [{"id": v, "value": {"label": v}} for v in visited],
+        "edges": [
+            {"source": src, "target": dst, "label": "edge"}
+            for src, dst in spanning_edges
+        ],
+        "directed": False,
+    }
+"""
+
+STEP_TRACER_CASES: tuple[dict[str, Any], ...] = (
+    {
+        "label": "Bubble sort array states",
+        "snippet": STEP_TRACER_SNIPPET,
+        "watch": ["data"],
+        "max_events": 6,
+        "max_frames": 4,
+        "stem": "step_trace_sort",
+    },
+    {
+        "label": "BFS frontier + visited nodes",
+        "snippet": STEP_TRACER_BFS_SNIPPET,
+        "watch": ["queue_state", "visited_nodes"],
+        "max_events": 12,
+        "max_frames": 5,
+        "stem": "step_trace_bfs",
+    },
+    {
+        "label": "0/1 knapsack DP table",
+        "snippet": STEP_TRACER_DP_SNIPPET,
+        "watch": ["dp_matrix"],
+        "max_events": 12,
+        "max_frames": 5,
+        "stem": "step_trace_dp",
+    },
+    {
+        "label": "BFS spanning tree graph",
+        "snippet": STEP_TRACER_GRAPH_SNIPPET,
+        "watch": ["graph_snapshot"],
+        "max_events": 10,
+        "max_frames": 5,
+        "stem": "step_trace_graph",
+    },
+)
+
 
 
 # -----------------------------
@@ -192,47 +314,56 @@ def build_shortest_path_usecase() -> dict[str, Any]:
 OUTPUT_DIR = Path(__file__).with_name("demo_outputs")
 
 
-def set_view_override(name: str, view: ViewKind) -> None:
-    """Register/replace a mapper entry so visualize() stays config-driven."""
-    viz_config.DEFAULT_VIEW_NAME_MAP[name] = view
+def set_view_override(config: VisualizerConfig, name: str, view: ViewKind) -> None:
+    """Register/replace a mapper entry so demo_visualize() stays config-driven."""
+
+    config.view_name_map[name] = view
 
 
-def configure_demo_view_overrides() -> None:
+def configure_demo_view_overrides(config: VisualizerConfig) -> None:
     """Demonstrate the new mapper: clear defaults, then add name & type rules."""
-    viz_config.DEFAULT_VIEW_MAP.clear()
-    viz_config.DEFAULT_VIEW_NAME_MAP.clear()
-    viz_config.NESTED_DEPTH_MAP.clear()
-    # 保留 config.py 的 DEFAULT_VIEW_TYPE_MAP，示例仅通过 name override 控制视图。
+
+    config.view_map.clear()
+    config.view_name_map.clear()
+    config.nested_depth_map.clear()
+
     overrides: dict[str, ViewKind] = {
-        "arr": "array_cells",
-        "arr_bar": "bar",
-        "linked": "linked_list",
-        "hash_table": "hash_table",
-        "metrics": "table",
-        "T": "tree",
-        "tic_tac_toe": "tree",
-        "heap": "heap_dual",
-        "nested": "array_cells",
-        "tuple_block": "array_cells",
-        "avatar_img": "image",
-        "profile": "table",
-        "matrix_demo": "matrix",
-        "np_values": "array_cells",
-        "nested_demo": "array_cells",
-        "graph_demo": "graph",
-        "combo": "array_cells",
-        "combo[0].tree": "tree",
-        "combo[1].graph": "graph",
-        "combo[2].media.trend": "bar",
-        "shortest_path": "table",
-        "shortest_path.graph": "graph",
-        "shortest_path.path_tree": "tree",
-        "shortest_path.frontier_frames": "array_cells",
-        "shortest_path.best_dist": "table",
+        "arr": ViewKind.ARRAY_CELLS,
+        "arr_bar": ViewKind.BAR,
+        "linked": ViewKind.LINKED_LIST,
+        "hash_table": ViewKind.HASH_TABLE,
+        "metrics": ViewKind.TABLE,
+        "T": ViewKind.TREE,
+        "tic_tac_toe": ViewKind.TREE,
+        "heap": ViewKind.HEAP_DUAL,
+        "nested": ViewKind.ARRAY_CELLS,
+        "tuple_block": ViewKind.ARRAY_CELLS,
+        "avatar_img": ViewKind.IMAGE,
+        "data": ViewKind.BAR,
+        "queue_state": ViewKind.ARRAY_CELLS,
+        "visited_nodes": ViewKind.ARRAY_CELLS,
+        "dp_matrix": ViewKind.MATRIX,
+        "graph_snapshot": ViewKind.GRAPH,
+        "profile": ViewKind.TABLE,
+        "matrix_demo": ViewKind.MATRIX,
+        "np_values": ViewKind.ARRAY_CELLS,
+        "nested_np": ViewKind.ARRAY_CELLS,
+        "nested_demo": ViewKind.ARRAY_CELLS,
+        "graph_demo": ViewKind.GRAPH,
+        "combo": ViewKind.ARRAY_CELLS,
+        "combo[0].tree": ViewKind.TREE,
+        "combo[1].graph": ViewKind.GRAPH,
+        "combo[2].media.trend": ViewKind.BAR,
+        "shortest_path": ViewKind.TABLE,
+        "shortest_path.graph": ViewKind.GRAPH,
+        "shortest_path.path_tree": ViewKind.TREE,
+        "shortest_path.frontier_frames": ViewKind.ARRAY_CELLS,
+        "shortest_path.best_dist": ViewKind.TABLE,
     }
     for key, view in overrides.items():
-        set_view_override(key, view)
-        viz_config.NESTED_DEPTH_MAP.update(
+        set_view_override(config, key, view)
+
+    config.nested_depth_map.update(
         {
             "nested": 3,
             "nested_embed": 3,
@@ -240,6 +371,7 @@ def configure_demo_view_overrides() -> None:
             "tuple_block": 2,
             "profile": 2,
             "np_values": 2,
+            "nested_np": 3,
             "linked": 2,
             "hash_table": 2,
             "tic_tac_toe": 2,
@@ -251,27 +383,30 @@ def configure_demo_view_overrides() -> None:
     )
 
 
-def _resolve_output_format(fmt: str | None = None) -> str:
+def demo_visualize(value: Any, *, config: VisualizerConfig, **kwargs):
+    """Wrapper that keeps the demo config explicit."""
+
+    kwargs.setdefault("config", config)
+    return visualize(value, **kwargs)
+
+
+def _resolve_output_format(config: VisualizerConfig, fmt: str | None = None) -> str:
     if fmt:
         return fmt
-    default_fmt = getattr(viz_config, "DEFAULT_OUTPUT_FORMAT", "svg")
-    allowed = getattr(viz_config, "ALLOWED_OUTPUT_FORMATS", {"svg", "png", "jpg"})
-    if default_fmt not in allowed:
-        raise ValueError(f"Unsupported output format configured: {default_fmt}")
-    return default_fmt
+    return config.ensure_output_format(fmt)
 
 
-def save_artifact(artifact, stem: str, fmt: str | None = None) -> Path:
-    if artifact.kind == "text":
+def save_artifact(artifact, stem: str, *, config: VisualizerConfig, fmt: str | None = None) -> Path:
+    if artifact.kind == ArtifactKind.TEXT:
         text_path = OUTPUT_DIR / f"{stem}.txt"
         text_path.write_text(artifact.content, encoding="utf-8")
         return text_path
-    if artifact.kind != "graphviz":
+    if artifact.kind != ArtifactKind.GRAPHVIZ:
         raise ValueError(f"graphviz artifact expected, got: {artifact.kind}")
 
     OUTPUT_DIR.mkdir(exist_ok=True)
     src = Source(artifact.content)
-    resolved_fmt = _resolve_output_format(fmt)
+    resolved_fmt = _resolve_output_format(config, fmt)
     src.format = resolved_fmt
     rendered_path = Path(src.render(filename=stem, directory=str(OUTPUT_DIR), cleanup=True))
     return rendered_path.with_suffix(f".{resolved_fmt}")
@@ -279,21 +414,22 @@ def save_artifact(artifact, stem: str, fmt: str | None = None) -> Path:
 
 def main() -> None:
     OUTPUT_DIR.mkdir(exist_ok=True)
-    configure_demo_view_overrides()
+    demo_config = default_visualizer_config()
+    configure_demo_view_overrides(demo_config)
     print("\n=== 模块划分提示 ===")
     print("graph_builder -> graph_view_builder (array/matrix/tree/hash_table/heap_dual 等)")
     print("renderers 保留 image/bar/scalar 等原子视图，负责最终 Graphviz 输出")
 
     # 1) list[int] -> array cells (default auto)
     arr = [3, 1, 2, 4, 1, 5]
-    art = visualize(arr, name="arr")
-    path = save_artifact(art, "arr_array")
+    art = demo_visualize(arr, name="arr", config=demo_config)
+    path = save_artifact(art, "arr_array", config=demo_config)
     print("\n=== list[int] -> array strip (Visualgo style, Graphviz) ===")
     print(f"saved: {path}")
 
     # optional: list[int] -> bar
-    # art = visualize(arr, name="arr_bar")
-    # path = save_artifact(art, "arr_bar")
+    # art = demo_visualize(arr, name="arr_bar", config=demo_config)
+    # path = save_artifact(art, "arr_bar", config=demo_config)
     # print("\n=== list[int] -> bar (Graphviz pseudo chart) ===")
     # print(f"saved: {path}")
 
@@ -305,8 +441,8 @@ def main() -> None:
             {"label": "C"},
         ]
     )
-    art = visualize(head, name="linked")
-    path = save_artifact(art, "linked_list")
+    art = demo_visualize(head, name="linked", config=demo_config)
+    path = save_artifact(art, "linked_list", config=demo_config)
     print("\n=== linked list (nested payloads inline) ===")
     print(f"saved: {path}")
 
@@ -317,8 +453,8 @@ def main() -> None:
         [{"key": "ba", "payload": build_linked_list([1, {"deep": [2, 3]}, 4])}],
         [{"key": "ca", "payload": {"stats": {"min": 1, "max": 9}}}],
     ]
-    art = visualize(hash_table, name="hash_table")
-    path = save_artifact(art, "hash_table")
+    art = demo_visualize(hash_table, name="hash_table", config=demo_config)
+    path = save_artifact(art, "hash_table", config=demo_config)
     print("\n=== hash table (buckets + nested cells) ===")
     print(f"saved: {path}")
 
@@ -336,29 +472,29 @@ def main() -> None:
         ],
         "directed": True,
     }
-    art = visualize(graph_snapshot, name="graph_demo")
-    path = save_artifact(art, "graph_demo")
+    art = demo_visualize(graph_snapshot, name="graph_demo", config=demo_config)
+    path = save_artifact(art, "graph_demo", config=demo_config)
     print("\n=== graph mapping -> graph view with edge labels ===")
     print(f"saved: {path}")
 
     # dict -> table
     metrics = {"p": 0.9, "q": 1.2, "r": 0.3}
-    art = visualize(metrics, name="metrics")
-    path = save_artifact(art, "metrics_table")
+    art = demo_visualize(metrics, name="metrics", config=demo_config)
+    path = save_artifact(art, "metrics_table", config=demo_config)
     print("\n=== dict -> Graphviz table ===")
     print(f"saved: {path}")
 
     # tree -> tree
     root = build_tree_demo()
-    art = visualize(root, name="T")
-    path = save_artifact(art, "tree_rooted")
+    art = demo_visualize(root, name="T", config=demo_config)
+    path = save_artifact(art, "tree_rooted", config=demo_config)
     print("\n=== tree -> tree ===")
     print(f"saved: {path}")
 
     # tic-tac-toe search tree (nodes render as matrices)
     ttt_root = build_tictactoe_tree()
-    art = visualize(ttt_root, name="tic_tac_toe")
-    path = save_artifact(art, "tictactoe_tree")
+    art = demo_visualize(ttt_root, name="tic_tac_toe", config=demo_config)
+    path = save_artifact(art, "tictactoe_tree", config=demo_config)
     print("\n=== tic-tac-toe tree with board states ===")
     print(f"saved: {path}")
 
@@ -376,8 +512,8 @@ def main() -> None:
             }
         },
     ]
-    art = visualize(nested, name="nested_demo")
-    path = save_artifact(art, "nested_array")
+    art = demo_visualize(nested, name="nested_demo", config=demo_config)
+    path = save_artifact(art, "nested_array", config=demo_config)
     print("\n=== nested list/dict (recursive cells invoking other views) ===")
     print(f"saved: {path}")
 
@@ -387,29 +523,30 @@ def main() -> None:
         [5, 6, 7, 8],
         [9, 10, 11, 12],
     ]
-    art = visualize(matrix_values, name="matrix_demo")
-    path = save_artifact(art, "matrix_grid")
+    art = demo_visualize(matrix_values, name="matrix_demo", config=demo_config)
+    path = save_artifact(art, "matrix_grid", config=demo_config)
     print("\n=== matrix view (auto-selected via DEFAULT_VIEW_TYPE_MAP) ===")
     print(f"saved: {path}")
 
     # 8) tuple coerced to array via config name override
     tuple_block = ([1, {"deep": [2, 3]}], [4, 5])
-    art = visualize(
+    art = demo_visualize(
         tuple_block,
         name="tuple_block",
+        config=demo_config,
     )
-    path = save_artifact(art, "tuple_as_array")
+    path = save_artifact(art, "tuple_as_array", config=demo_config)
     print("\n=== tuple -> array_cells via DEFAULT_VIEW_NAME_MAP ===")
     print(f"saved: {path}")
 
     lll=True
-    art = visualize(lll, name="value")
-    path = save_artifact(art, f"value")
+    art = demo_visualize(lll, name="value", config=demo_config)
+    path = save_artifact(art, f"value", config=demo_config)
     print(f"saved: {path}")
 
     # prepare avatar asset for image + table demo
     avatar_src = OUTPUT_DIR / "nus.png"
-    # ascii_assets = Path(tempfile.gettempdir()) / "edcraft_demo_images"
+    # ascii_assets = Path(tempfile.gettempdir()) / "code_visualizer_demo_images"
     # ascii_assets.mkdir(exist_ok=True)
     # avatar_png = ascii_assets / "nus.png"
     # avatar_asset: Path | None = None
@@ -424,16 +561,16 @@ def main() -> None:
 
     # 8b) standalone image value (explicit image view)
     # if avatar_asset and avatar_asset.exists():
-    #     set_view_override("avatar_img", "image")
-    #     art = visualize(str(avatar_asset), name="avatar_img")
-    #     path = save_artifact(art, "avatar_image")
+    #     set_view_override(demo_config, "avatar_img", ViewKind.IMAGE)
+    #     art = demo_visualize(str(avatar_asset), name="avatar_img", config=demo_config)
+    #     path = save_artifact(art, "avatar_image", config=demo_config)
     #     print("\n=== standalone image value ===")
     #     print(f"saved: {path}")
     # else:
     #     print("\n=== standalone image value ===")
     #     print("avatar asset missing; skipping image demo")
-    art = visualize(str(avatar_src), name="avatar_img")
-    path = save_artifact(art, "avatar_image")
+    art = demo_visualize(str(avatar_src), name="avatar_img", config=demo_config)
+    path = save_artifact(art, "avatar_image", config=demo_config)
     print("\n=== standalone image value ===")
     print(f"saved: {path}")
 
@@ -449,11 +586,12 @@ def main() -> None:
         "user": {"name": "Lin", "avatar": avatar_value},
         "history": [{"scores": [91, 88, 95]}, {"notes": {"week": "2026-W06", "trend": [1, 3, 6]}}],
     }
-    art = visualize(
+    art = demo_visualize(
         profile_snapshot,
         name="profile",
+        config=demo_config,
     )
-    path = save_artifact(art, "profile_table")
+    path = save_artifact(art, "profile_table", config=demo_config)
     print("\n=== dict table with nested depth override & local image ===")
     print(f"saved: {path}")
 
@@ -462,25 +600,37 @@ def main() -> None:
         {"graph": graph_snapshot},
         {"media": {"avatar": avatar_value, "trend": [2.5, -1.0, 3.2, 4.1]}},
     ]
-    art = visualize(combo_payload, name="combo")
-    combo_path = save_artifact(art, "combo_nested", fmt="png")
+    art = demo_visualize(combo_payload, name="combo", config=demo_config)
+    combo_path = save_artifact(art, "combo_nested", config=demo_config, fmt="png")
     print("\n=== combo list -> nested views (tree + graph + bar + image, exported PNG) ===")
     print(f"saved: {combo_path}")
 
     # algorithmic use case: shortest path trace
     shortest_payload = build_shortest_path_usecase()
-    art = visualize(shortest_payload, name="shortest_path")
-    path = save_artifact(art, "shortest_path")
+    art = demo_visualize(shortest_payload, name="shortest_path", config=demo_config)
+    path = save_artifact(art, "shortest_path", config=demo_config)
     print("\n=== shortest path trace (graph + frontier frames + tree) ===")
     print(f"saved: {path}")
 
     # 10) numpy ndarray auto-conversion
     if np is not None:
         np_values = np.array([[1, 2, 3], [4, 5, 6]])
-        art = visualize(np_values, name="np_values")
-        path = save_artifact(art, "numpy_array")
+        art = demo_visualize(np_values, name="np_values", config=demo_config)
+        path = save_artifact(art, "numpy_array", config=demo_config)
         print("\n=== numpy ndarray -> array_cells (auto) ===")
         print(f"saved: {path}")
+
+        nested_np = np.array(
+            [
+                np.array([[1, 2], [3, 4]]),
+                np.array([[5, 6], [7, 8]]),
+            ],
+            dtype=object,
+        )
+        art = demo_visualize(nested_np, name="nested_np", config=demo_config)
+        nested_path = save_artifact(art, "nested_np_array", config=demo_config)
+        print("\n=== nested numpy ndarray -> nested array cells ===")
+        print(f"saved: {nested_path}")
     else:
         print("\n=== numpy ndarray -> array_cells (auto) ===")
         print("(numpy not installed; skipping)")
@@ -511,13 +661,59 @@ def main() -> None:
         ],
         "verdict": None,
     }
-    art = visualize(
+    art = demo_visualize(
         complex_payload,
         name="complex_auto",
+        config=demo_config,
     )
-    path = save_artifact(art, "complex_auto")
+    path = save_artifact(art, "complex_auto", config=demo_config)
     print("\n=== complex structure -> auto (recurses down to value view) ===")
     print(f"saved: {path}")
+
+    tracer_missing = False
+    for case in STEP_TRACER_CASES:
+        print(f"\n=== step-tracer: {case['label']} ===")
+        if tracer_missing:
+            print("step-tracer 未安装，跳过剩余示例")
+            break
+        try:
+            tracer_events = trace_algorithm(
+                case["snippet"],
+                case["watch"],
+                max_events=case.get("max_events"),
+            )
+        except StepTracerUnavailableError as exc:
+            print(f"step-tracer 未安装，跳过动态跟踪示例: {exc}")
+            tracer_missing = True
+            break
+        traces = build_traces(tracer_events)
+        for target in case["watch"]:
+            if isinstance(target, str):
+                target_name = target
+            elif isinstance(target, Mapping):
+                target_name = str(target.get("name", "") or "")
+            else:
+                target_name = getattr(target, "name", "") or ""
+            if not target_name:
+                continue
+            data_trace = traces.get(target_name)
+            if data_trace is None:
+                print(f"{target_name} 未捕获，跳过")
+                continue
+            trace_arts = visualize_trace(
+                data_trace,
+                config=demo_config,
+                max_frames=case.get("max_frames"),
+            )
+            for idx, artifact in enumerate(trace_arts, start=1):
+                trace_path = save_artifact(
+                    artifact,
+                    f"{case['stem']}_{target_name}_{idx}",
+                    config=demo_config,
+                )
+                print(f"{target_name} frame {idx}: {trace_path}")
+            if not trace_arts:
+                print(f"{target_name} 没有可用帧")
 
 
 if __name__ == "__main__":

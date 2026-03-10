@@ -1,189 +1,194 @@
-# Code Visualizer Mapper Guide
+# Code Visualizer
 
-The visualizer picks a rendering "view" for every value you pass to
-`graph_builder.visualize()`. The decision pipeline matches overrides in the
-following order:
+Graphviz-first helpers for turning arbitrary Python values into consistent visualizations. The project ships as a regular Python package and exposes a purely functional API so you can construct configs per session and pass them into `visualize()` or the StepTracer helpers without relying on module-level state.
 
-1. **Name overrides** - `config.DEFAULT_VIEW_NAME_MAP` matches exact variable
-   names or simple key/index paths such as `profile.history[0].scores`.
-2. **Type-pattern overrides** - `config.DEFAULT_VIEW_TYPE_MAP` consumes
-   lightweight structural patterns (see syntax below).
-3. **Legacy isinstance overrides** - `config.DEFAULT_VIEW_MAP`.
-4. **Automatic chooser** - `renderers.choose_view()` inspects the runtime value
-   and falls back to a Visual IR node-link view if nothing else matches.
+## Highlights
+- Graphviz-first renderers cover arrays, matrices, tables, trees, graphs, heaps, linked lists, hash tables, and fallback node-link IRs.
+- Functional API: `visualize`, `visualize_trace`, and `visualize_traces` only depend on the `VisualizerConfig` instance you pass in.
+- `ViewKind` enums and structured override maps replace ad-hoc strings so IDEs and type-checkers can validate inputs.
+- Converter pipelines (NumPy, pandas, or user supplied) run once per recursion layer, enabling seamless handling of nested arrays or custom tensor objects.
+- Optional [step-tracer](https://github.com/edcraft-org/step-tracer) integration lets you capture algorithm executions, filter the variables you care about, and feed snapshots back into the same visualization pipeline.
 
-## Available views
+## Table of contents
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Demo gallery](#demo-gallery)
+- [Config lifecycle & customization](#config-lifecycle--customization)
+- [Converter pipeline](#converter-pipeline)
+- [Supported view kinds](#supported-view-kinds)
+- [Step-tracer workflow](#step-tracer-workflow)
+- [Public API reference](#public-api-reference)
+- [Troubleshooting](#troubleshooting)
 
-| ViewKind      | Ideal inputs / behavior                                                          |
-|---------------|-----------------------------------------------------------------------------------|
-| `array_cells` | `list`/`tuple`/`set`/`frozenset` of scalars or nested structures                 |
-| `matrix`      | 2D arrays (list/tuple of lists/tuples)                                           |
-| `image`       | Local paths/URLs/data URIs, `pathlib.Path`, `PIL.Image`, matplotlib `Figure` etc. |
-| `bar`         | Numeric lists (homogeneous)                                                      |
-| `table`       | Dict-like objects (string or mixed keys)                                         |
-| `tree`        | Binary or n-ary nodes exposing `.children`/`.left/.right`, or dicts with `children` |
-| `graph`       | NetworkX graphs or plain mappings with `nodes` + `edges` (edge labels supported)  |
-| `heap_dual`   | Heap arrays rendered via the shared array/tree builders                          |
-| `linked_list` | Objects with `.next` pointer chain or lists of nodes representing a chain        |
-| `hash_table`  | Buckets with pointer-style chains (lists/dicts/sets/linked nodes)                |
-| `node_link`   | Generic fallback (Visual IR) for anything else                                   |
+## Installation
 
-## Module layout
+### Requirements
+- Python 3.11+ for the core package (StepTracer itself currently targets Python 3.12+).
+- The `graphviz` Python package plus the Graphviz CLI tools (`dot`, `neato`, ...). Install via Homebrew (`brew install graphviz`), `apt`, etc.
+- Optional: `step-tracer` (install from Git) when you want execution tracing.
 
-- `graph_builder.visualize` resolves the mapper (name -> type-pattern -> legacy overrides) and dispatches to the appropriate renderer.
-- `graph_view_builder.GraphViewBuilder` houses every composite Graphviz view (array / matrix / table / hash_table / linked_list / tree / graph / heap_dual / bar). Because all of them share the same builder, they can mount nested ports uniformly and recursively ask the mapper for child views.
-- `renderers.py` keeps the atomic views (`image`, `scalar`, Visual IR node-link). Bars are emitted as HTML labels inside Graphviz nodes so they can be embedded elsewhere. Atomic views are leaf nodes-they do not recurse further.
+### Pip install
+```bash
+pip install git+https://github.com/edcraft-org/code-visualizer.git
+```
 
-With this split, `hash_table` regains the "bucket + chain" style, `heap_dual` reuses the array + tree builders, and any complex structure can attach to the global graph through the same port mechanism.
+### Local development
+```bash
+git clone https://github.com/edcraft-org/code-visualizer.git
+cd code-visualizer
+python -m venv .venv && source .venv/bin/activate
+pip install -e .
+```
+The `pip install -e .` step also installs runtime dependencies such as `graphviz`, `matplotlib`, `networkx`, `numpy`, `pandas`, and `pillow`.
 
-## Graphviz-first rendering strategy
+## Quick start
 
-- **Prefer Graphviz APIs** - arrays, matrices, trees, graphs, hash tables, heaps, and linked lists are all translated into a `VisualGraph` and rendered through `render_graphviz_node_link()` via the official `Digraph` API. Rank, ports, and layout are fully delegated to Graphviz.
-- **HTML labels only** - every snippet of HTML in `graph_view_builder` is an HTML-like label that Graphviz natively understands (mostly `<TABLE>` tags). They never bypass Graphviz's renderer, so the pipeline still honours the "Graphviz first" requirement.
-- **Nested views still use Graphviz** - when a cell needs to embed another view (tree/graph/etc.), the builder spins up a nested `VisualGraph`, renders it to DOT, converts it to PNG/SVG through `_render_dot_to_image()`, and drops the resulting `<IMG>` back into the parent cell. Only if Graphviz fails do we fall back to plain text placeholders.
-- **Atomic views stay minimal** - helpers such as `render_graphviz_image`, `render_graphviz_scalar`, and the bar/array fallbacks still build tiny `Digraph`s themselves so that leaf views can be embedded anywhere without adding another recursion layer.
+### Direct data visualization
+```python
+from code_visualizer import default_visualizer_config, visualize, ViewKind
+from graphviz import Source
 
-## Type-pattern syntax
+config = default_visualizer_config()
+config.view_name_map["loss_history"] = ViewKind.BAR
+payload = {"epoch": [1, 2, 3], "loss_history": [0.5, 0.3, 0.2]}
 
+artifact = visualize(payload, name="training_stats", config=config)
+if artifact.kind == "graphviz":
+    Source(artifact.content).render("training_stats", format="png", cleanup=True)
+```
+Calling `default_visualizer_config()` always returns a fresh `VisualizerConfig`. Any mutation you perform (view overrides, converter changes, nested-depth tweaks, etc.) is scoped to that instance. Pass the same config to every `visualize()` call in one session, then create another config for the next session if you need a clean slate.
+
+### StepTracer-powered execution trace
+```python
+from code_visualizer import default_visualizer_config, visualize_trace
+from code_visualizer.step_tracing import trace_algorithm, build_traces, WatchFilter
+
+snippet = """
+data = [7, 3, 5, 1]
+for i in range(len(data)):
+    swapped = False
+    for j in range(0, len(data) - i - 1):
+        if data[j] > data[j + 1]:
+            data[j], data[j + 1] = data[j + 1], data[j]
+            swapped = True
+    if not swapped:
+        break
+"""
+
+tracer = trace_algorithm(snippet, watch_variables=[
+    "data",
+    {"name": "swapped", "line_number": 4},
+    WatchFilter(name="queue_state", scope_id=1),
+])
+traces = build_traces(tracer.events)
+config = default_visualizer_config()
+frames = visualize_trace(traces["data"], config=config)
+```
+Use dictionaries or `WatchFilter` instances (with `name`, `scope_id`, and `line_number`) to disambiguate variables that share the same identifier but live in different scopes.
+
+## Demo gallery
+Run the end-to-end showcase to regenerate every artifact (array layouts, graph mappings with edge labels, DP matrices, numpy-nested payloads, and several StepTracer cases such as bubble sort, BFS queue state, DP tables, and graph snapshots):
+```bash
+python -m code_visualizer.demo
+```
+All PNG/SVG outputs land in `src/code_visualizer/demo_outputs/`. We removed pre-generated images from the repo to keep commits light—rerun the demo anytime to recreate them. Each StepTracer case is defined in `STEP_TRACER_CASES` inside `demo.py`, so you can tweak payloads, watch filters, or append new algorithms.
+
+## Config lifecycle & customization
+
+### Fresh configs and copying
+- `default_visualizer_config()` → returns a brand new config; call it for every visualization session.
+- `config.copy()` → shallow copy if you want to fork an existing setup without mutating the original.
+
+### View selection order
+`visualize()` resolves the best renderer through this ladder:
+1. **Name overrides** via `config.view_name_map`.
+2. **Type-pattern overrides** via `config.view_type_map` (structural strings).
+3. **Legacy type overrides** via `config.view_map` keyed by Python classes.
+4. **Automatic chooser** which inspects the runtime value (graph heuristics, matrix detection, node-link fallback, etc.).
+
+### Override maps
+```python
+config.view_name_map["graph_snapshot"] = ViewKind.GRAPH
+config.view_type_map["tuple[list]"] = ViewKind.MATRIX
+config.view_map[MyTreeNode] = ViewKind.TREE
+```
+
+### Type-pattern cheat sheet
 ```
 pattern := atom ["[" pattern {"," pattern} "]"]
-atom    := list | tuple | set | frozenset | dict | int | float
-           | bool | number | str | bytes | path | any | none
-           | linked_list | tree
+atom    := list | tuple | set | frozenset | dict | int | float | bool | number
+           | str | bytes | path | any | none | linked_list | tree
 ```
+Examples: `list[number]` for numeric arrays, `tuple[list]` for matrices, `dict[str, any]` for key-value tables, `linked_list`, `tree`.
 
-Examples:
+### Nested depth, layout, and format
+- `nested_depth_default` / `nested_depth_map` limit how deeply list/dict payloads expand inside HTML table renderers.
+- `auto_nested_depth_cap` prevents runaway recursion in arbitrarily deep payloads.
+- `output_format` (`"svg"`, `"png"`, or `"jpg"`) guides helper utilities such as `demo.save_artifact()`; `allowed_output_formats` guards invalid requests.
+- `visualize(..., direction="LR" | "TB")` lets you control Graphviz rank direction without mutating config-level defaults.
 
-| Pattern            | Meaning / common use             |
-|--------------------|----------------------------------|
-| `list[number]`     | numeric array -> `array_cells`    |
-| `tuple[list]`      | tuple of lists -> `matrix`        |
-| `dict[str, any]`   | object-like dict -> `table`       |
-| `linked_list`      | objects exposing `.next`         |
-| `tree`             | object/dict nodes exposing `children` |
+## Converter pipeline
+Converters run before every view selection, one recursion layer at a time. The default pipeline already supports:
+1. NumPy arrays → `list` / nested `list[list]`
+2. pandas `DataFrame` / `Series` → dict payloads
+3. Identity fallback
 
-## Customizing views
-
-Override the dictionaries in `config.py` (either editing the file or mutating
-them before calling `visualize()`):
-
+Extend it per session:
 ```python
-from edcraft_engine.code_visualizer import config as viz_config
+from code_visualizer import default_visualizer_config
 
-# Force a specific variable to render as a bar chart.
-viz_config.DEFAULT_VIEW_NAME_MAP["loss_history"] = "bar"
-
-# Treat every tuple of tuples as a matrix.
-viz_config.DEFAULT_VIEW_TYPE_MAP["tuple[tuple]"] = "matrix"
-
-# Map a custom class to the tree view.
-from mynodes import TreeNode
-viz_config.DEFAULT_VIEW_MAP[TreeNode] = "tree"
+config = default_visualizer_config().with_converters(
+    lambda value: (
+        (True, value.tolist()) if "torch" in type(value).__module__ else (False, value)
+    ),
+    prepend=True,
+)
 ```
+Because conversion is invoked at each recursion level, nested `numpy.ndarray` values (including ndarray-of-ndarray payloads) get flattened lazily—exactly how the demo exercises the new matrix/array cases.
 
-You can also adjust nested depth via `viz_config.DEFAULT_NESTED_DEPTH` or
-`viz_config.NESTED_DEPTH_MAP` to control how deeply lists/dicts expand inside
-the array/table renderers.
+## Supported view kinds
 
-- `viz_config.DEFAULT_OUTPUT_FORMAT` (allowed values: `"svg"`, `"png"`, `"jpg"`)
-controls the default format emitted by helpers such as `demo.save_artifact`.
-Change it to `"png"` or `"jpg"` if you prefer rasterized previews.
+| `ViewKind` value | Typical input                                                                    |
+|------------------|------------------------------------------------------------------------------------|
+| `ARRAY_CELLS`    | `list` / `tuple` / `set` / `frozenset` of scalars or nested values                 |
+| `MATRIX`         | 2-D arrays (`list[list]`, nested tuples, NumPy ndarrays)                           |
+| `IMAGE`          | Local paths, URLs, `pathlib.Path`, `PIL.Image`, matplotlib `Figure`, etc.          |
+| `BAR`            | Homogeneous numeric lists                                                          |
+| `TABLE`          | Dict-like objects (`dict[str, any]`, dataclass `asdict`, pandas dicts)              |
+| `TREE`           | Objects exposing `.children` / `.left` / `.right`, or dicts containing `children`   |
+| `GRAPH`          | NetworkX graphs or `{"nodes": [...], "edges": [...], "directed": bool}` mappings  |
+| `LINKED_LIST`    | Objects with `.next` pointers or `[{"value": ..., "next": ...}]` payloads          |
+| `HASH_TABLE`     | Buckets containing payload chains (lists/dicts/sets/linked nodes)                   |
+| `HEAP_DUAL`      | Heap arrays rendered as array + tree combo                                          |
+| `NODE_LINK`      | Generic Visual IR fallback when no specific view matches                           |
 
-### Tree inputs at a glance
+Tree tips: supply `.children` or dicts with `children` plus optional `label` / `value`. Graph tips: edges accept dicts (`source`/`target`, optional `label`) or tuples `(src, dst, label)`. Avoid literal `[]` characters in node IDs; prefer underscores (`node_1`) to keep Graphviz parsers happy.
 
-The `tree` view accepts a unified structure so you can mix binary and n-ary
-nodes:
+## Step-tracer workflow
+1. `trace_algorithm(source_code, watch_variables=...)` → runs StepTracer and captures snapshots.
+2. `watch_variables` accepts:
+   - plain strings (`"data"`),
+   - dicts `{"name": "queue_state", "scope_id": 5, "line_number": 23}` for disambiguation,
+   - or `WatchFilter` instances. Mix them freely to handle duplicate variable names that appear in different scopes or lines.
+3. `build_traces(events, name_factory=...)` groups snapshots per variable and returns `Trace` objects.
+4. `visualize_trace(trace, config=..., max_frames=..., direction="LR")` renders each frame via the same `visualize()` helper.
+5. `visualize_traces(traces.values(), config=...)` bulk-renders everything, returning a `{name: [Artifact, ...]}` map.
 
-- **Objects with `.children`** - any iterable works; node labels come from
-  `.val`, `.value`, or fall back to the class name.
-- **Binary nodes** - `.left`/`.right` pointers remain supported, no adapter
-  needed.
-- **Plain mappings** - provide a `children` list plus optional `label`, `name`,
-  `value`, `board`, or `data`. Remaining keys are rendered inline so you can
-  embed extra metadata.
+If `step-tracer` is missing, the helpers raise `StepTracerUnavailableError` with installation hints.
 
-### Graph inputs and edge labels
+## Public API reference
+- `default_visualizer_config()` – factory for fresh configs.
+- `VisualizerConfig.with_converters()` / `.copy()` – scoped mutations.
+- `visualize(value, *, name, config, direction="LR")` – render arbitrary payloads.
+- `visualize_trace(trace, *, config, max_frames=None, direction="LR")` – replay a single StepTracer trace.
+- `visualize_traces(traces, *, config, max_frames=None, direction="LR")` – convenience wrapper for multiple traces.
+- `trace_algorithm(source, *, watch_variables=None)` – run StepTracer (requires Python 3.12+).
+- `build_traces(events, name_factory=None)` – convert raw events to `Trace` objects.
+- `ViewKind` enum – strongly typed view identifiers for overrides and rendering decisions.
 
-`graph` can now ingest either NetworkX graphs or simple dictionaries:
-
-```python
-graph_payload = {
-    "nodes": [
-        {"id": "A", "value": {"name": "Alpha"}},
-        {"id": "B", "value": {"name": "Beta"}},
-        "C",  # scalar entries double as both id & label
-    ],
-    "edges": [
-        {"source": "A", "target": "B", "label": "win"},
-        ("B", "C", "assist"),  # tuple form also works
-    ],
-    "directed": True,
-}
-```
-
-- Node entries may be scalars or mappings with `id`/`name` keys plus optional
-  `value`/`label`/`data`.
-- Edge entries accept `source`/`target` (or `from`/`to`) and optional
-  `label`/`value`/`weight` text, which is rendered directly on the edge.
-- Undirected graphs automatically suppress arrow heads (`dir=none`).
-
-Because the graph view now shares the same composite builder as the other
-Graphviz tables, you can nest a graph inside any array/table cell or render it
-recursively as part of a larger visualization.
-
-## Demo output gallery
-
-All previews below are generated by running `python -m edcraft_engine.code_visualizer.demo`.
-Artifacts are saved under `code_visualizer/src/edcraft_engine/code_visualizer/demo_outputs/`; rerun the demo whenever
-you update the data to refresh the screenshots.
-
-### Arrays, matrices & scalar views
-
-| Demo | Description | Preview |
-|------|-------------|---------|
-| `arr_array.png` | Default `array_cells` for `list[int]` | ![arr_array](src/edcraft_engine/code_visualizer/demo_outputs/arr_array.png) |
-| `tuple_as_array.png` | Tuple overridden to render as array cells | ![tuple_as_array](src/edcraft_engine/code_visualizer/demo_outputs/tuple_as_array.png) |
-| `numpy_array.png` | NumPy `ndarray` auto-coerced to list -> array view | ![numpy_array](src/edcraft_engine/code_visualizer/demo_outputs/numpy_array.png) |
-| `matrix_grid.png` | `matrix` view for 2D lists | ![matrix_grid](src/edcraft_engine/code_visualizer/demo_outputs/matrix_grid.png) |
-| `heap_dual.png` | Heap rendered as array + tree combo | ![heap_dual](src/edcraft_engine/code_visualizer/demo_outputs/heap_dual.png) |
-| `value.png` | Scalar fallback (plain text) | ![value](src/edcraft_engine/code_visualizer/demo_outputs/value.png) |
-| `avatar_image.png` | Standalone `image` view (local PNG) | ![avatar_image](src/edcraft_engine/code_visualizer/demo_outputs/avatar_image.png) |
-
-### Tables, dictionaries & nested payloads
-
-| Demo | Description | Preview |
-|------|-------------|---------|
-| `metrics_table.png` | `table` view for `dict[str, float]` | ![metrics_table](src/edcraft_engine/code_visualizer/demo_outputs/metrics_table.png) |
-| `profile_table.png` | Table embedding a local avatar + nested depth override | ![profile_table](src/edcraft_engine/code_visualizer/demo_outputs/profile_table.png) |
-| `nested_array.png` | List-of-dicts auto-expands nested cells | ![nested_array](src/edcraft_engine/code_visualizer/demo_outputs/nested_array.png) |
-| `complex_auto.png` | Deep dict/list/tuple structure rendered via auto view picking | ![complex_auto](src/edcraft_engine/code_visualizer/demo_outputs/complex_auto.png) |
-| `combo_nested.png` | Single list containing tree / graph / bar / image views | ![combo_nested](src/edcraft_engine/code_visualizer/demo_outputs/combo_nested.png) |
-
-### Linked structures, tree & graph views
-
-| Demo | Description | Preview |
-|------|-------------|---------|
-| `linked_list.png` | `.next` chain with recursive cells inside each node | ![linked_list](src/edcraft_engine/code_visualizer/demo_outputs/linked_list.png) |
-| `hash_table.png` | Bucket + chain layout (buckets horizontal, chains vertical) | ![hash_table](src/edcraft_engine/code_visualizer/demo_outputs/hash_table.png) |
-| `tree_rooted.png` | Generic rooted tree (binary + n-ary supported) | ![tree_rooted](src/edcraft_engine/code_visualizer/demo_outputs/tree_rooted.png) |
-| `tictactoe_tree.png` | Tree nodes embed 3x3 boards (matrix-in-tree nesting) | ![tictactoe_tree](src/edcraft_engine/code_visualizer/demo_outputs/tictactoe_tree.png) |
-| `graph_demo.png` | Custom graph payload with edge labels | ![graph_demo](src/edcraft_engine/code_visualizer/demo_outputs/graph_demo.png) |
-| `network_graph.png` | NetworkX Graph automatically rendered as `graph` view | ![network_graph](src/edcraft_engine/code_visualizer/demo_outputs/network_graph.png) |
-
-### Algorithm traces
-
-| Demo | Description | Preview |
-|------|-------------|---------|
-| `shortest_path.png` | Dijkstra-style trace with table embedding `graph`, frontier frames, tree, and distance table | ![shortest_path](src/edcraft_engine/code_visualizer/demo_outputs/shortest_path.png) |
-
-### Sorting frames & bar charts
-
-| Demo | Description | Preview |
-|------|-------------|---------|
-| `arr_bar.png` | `bar` view for `list[number]` | ![arr_bar](src/edcraft_engine/code_visualizer/demo_outputs/arr_bar.png) |
-| `sort_frame_1~4.png` | Bubble-sort trace, each frame rendered as a bar chart | ![sort_frame_1](src/edcraft_engine/code_visualizer/demo_outputs/sort_frame_1.png) ![sort_frame_2](src/edcraft_engine/code_visualizer/demo_outputs/sort_frame_2.png) ![sort_frame_3](src/edcraft_engine/code_visualizer/demo_outputs/sort_frame_3.png) ![sort_frame_4](src/edcraft_engine/code_visualizer/demo_outputs/sort_frame_4.png) |
-
-### Miscellaneous notes
-
-- `hash_table.png`, `linked_list.png`, and `graph_demo.png` highlight how nested ports allow complex structures to plug into larger diagrams.
-- `value.txt` shows the fallback artifact when a renderer returns plain text instead of Graphviz content.
+## Troubleshooting
+- **"No module named graphviz"** – ensure you installed both the Python package (`pip install graphviz`) and the Graphviz system binary (`brew install graphviz`, `apt install graphviz`, ...). Re-run `pip install -e .` inside your virtualenv afterwards.
+- **StepTracer requires Python >=3.12** – create a dedicated env (e.g., `uv venv -p 3.12 .venv312 && source .venv312/bin/activate`) before installing `step-tracer` from Git.
+- **`pip` missing inside a new env** – run `python -m ensurepip --upgrade` and retry `python -m pip install -e .`.
+- **Graph payload not detected** – either conform to the `{nodes, edges, directed}` mapping shown above or register a custom converter that rewrites your structure into that shape.
+- **Need different configs per visualization** – instantiate a new config via `default_visualizer_config()` or `config.copy()` rather than mutating a module-level singleton. This keeps concurrent notebooks or services from tripping over shared state.

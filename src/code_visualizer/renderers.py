@@ -30,51 +30,51 @@ from .view_utils import (
     _table_cell_text,
     dot_escape_label,
 )
-from edcraft_engine.code_visualizer.models import VisualGraph, VisualNode, VisualEdge, Anchor
+from .models import Anchor, AnchorKind, EdgeKind, NodeKind, VisualEdge, VisualGraph, VisualNode
 
 _AUTO_VIEW_TYPE_MAP: dict[str, ViewKind] = {
     # matrix-like
-    "list[list]": "matrix",
-    "list[tuple]": "matrix",
-    "tuple[list]": "matrix",
-    "tuple[tuple]": "matrix",
+    "list[list]": ViewKind.MATRIX,
+    "list[tuple]": ViewKind.MATRIX,
+    "tuple[list]": ViewKind.MATRIX,
+    "tuple[tuple]": ViewKind.MATRIX,
     # numeric/sequence defaults
-    "list[number]": "array_cells",
-    "tuple[number]": "array_cells",
-    "set[number]": "array_cells",
-    "frozenset[number]": "array_cells",
+    "list[number]": ViewKind.ARRAY_CELLS,
+    "tuple[number]": ViewKind.ARRAY_CELLS,
+    "set[number]": ViewKind.ARRAY_CELLS,
+    "frozenset[number]": ViewKind.ARRAY_CELLS,
     # generic sequence fallback
-    "list[any]": "array_cells",
-    "tuple[any]": "array_cells",
-    "set[any]": "array_cells",
-    "frozenset[any]": "array_cells",
+    "list[any]": ViewKind.ARRAY_CELLS,
+    "tuple[any]": ViewKind.ARRAY_CELLS,
+    "set[any]": ViewKind.ARRAY_CELLS,
+    "frozenset[any]": ViewKind.ARRAY_CELLS,
     # dict/table fallbacks
-    "dict[str, any]": "table",
-    "dict[any, any]": "table",
-    "dict": "table",
+    "dict[str, any]": ViewKind.TABLE,
+    "dict[any, any]": ViewKind.TABLE,
+    "dict": ViewKind.TABLE,
     # structural detectors
-    "linked_list": "linked_list",
-    "tree": "tree",
+    "linked_list": ViewKind.LINKED_LIST,
+    "tree": ViewKind.TREE,
 }
 
 
 def choose_view(value: Any) -> ViewKind:
     if _detect_image_source(value) is not None:
-        return "image"
+        return ViewKind.IMAGE
     if _try_networkx_edges_nodes(value) is not None:
-        return "graph"
+        return ViewKind.GRAPH
     if _looks_like_graph_mapping(value):
-        return "graph"
+        return ViewKind.GRAPH
     if _collect_linked_list_labels(value, max_nodes=10) is not None:
-        return "linked_list"
+        return ViewKind.LINKED_LIST
     if isinstance(value, (list, tuple)) and _looks_like_hash_table(list(value)):
-        return "hash_table"
+        return ViewKind.HASH_TABLE
     if _tree_children(value) is not None:
-        return "tree"
+        return ViewKind.TREE
     pattern_view = _match_type_pattern_override(value, _AUTO_VIEW_TYPE_MAP)
     if pattern_view is not None:
         return pattern_view
-    return "node_link"
+    return ViewKind.NODE_LINK
 
 
 def render_graphviz_node_link(g: VisualGraph, direction: Literal["LR", "TD"] = "LR") -> str:
@@ -327,7 +327,7 @@ def build_rooted_tree_graph(
     max_items: int = 50,
 ) -> VisualGraph:
     g = VisualGraph()
-    g.anchors.append(Anchor(name=name, node_id="ROOT", kind="var"))
+    g.anchors.append(Anchor(name=name, node_id="ROOT", kind=AnchorKind.VAR))
 
     counter = 0
     id_map: dict[int, str] = {}
@@ -340,7 +340,7 @@ def build_rooted_tree_graph(
             id_map[ox] = f"t{counter}"
         return id_map[ox]
 
-    g.add_node(VisualNode("ROOT", "object", f"{name}", {"kind": "tree_root"}))
+    g.add_node(VisualNode("ROOT", NodeKind.OBJECT, f"{name}", {"kind": "tree_root"}))
 
     info_cache: dict[int, tuple[Any, list[Any]] | None] = {}
 
@@ -360,11 +360,11 @@ def build_rooted_tree_graph(
             if is_html:
                 meta["html_label"] = True
                 meta["node_attrs"] = {"shape": "plain"}
-            g.add_node(VisualNode(node_id, "object", label_text, meta))
+            g.add_node(VisualNode(node_id, NodeKind.OBJECT, label_text, meta))
         return node_id
 
     root_id = ensure_node(root)
-    g.add_edge(VisualEdge("ROOT", root_id, type="contains", label=None))
+    g.add_edge(VisualEdge("ROOT", root_id, type=EdgeKind.CONTAINS, label=None))
 
     stack = [root]
     seen: set[int] = set()
@@ -386,13 +386,13 @@ def build_rooted_tree_graph(
         src = ensure_node(cur)
         for ch in kids:
             cid = ensure_node(ch)
-            g.add_edge(VisualEdge(src, cid, type="contains", label=None))
+            g.add_edge(VisualEdge(src, cid, type=EdgeKind.CONTAINS, label=None))
             stack.append(ch)
 
     if stack:
         eid = "CUT"
-        g.add_node(VisualNode(eid, "ellipsis", "… (cutoff)", {"cutoff": True}))
-        g.add_edge(VisualEdge(root_id, eid, type="contains", label=None))
+        g.add_node(VisualNode(eid, NodeKind.ELLIPSIS, "… (cutoff)", {"cutoff": True}))
+        g.add_edge(VisualEdge(root_id, eid, type=EdgeKind.CONTAINS, label=None))
 
     return g
 
