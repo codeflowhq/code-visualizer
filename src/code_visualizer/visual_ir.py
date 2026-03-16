@@ -169,11 +169,11 @@ class VisualIRExtractor:
 
         if self.opts.include_object_attrs and hasattr(v, "__dict__") and isinstance(v.__dict__, dict):
             items = list(v.__dict__.items())
-            for i, (k, val) in enumerate(items[: self.opts.max_items]):
+            for i, (k, val) in enumerate(items[: self.opts.max_items_per_view]):
                 child_id = self._visit(val, g, depth + 1, hint=k)
                 g.add_edge(VisualEdge(nid, child_id, type=EdgeKind.ATTR, label=k))
-            if len(items) > self.opts.max_items:
-                more = len(items) - self.opts.max_items
+            if len(items) > self.opts.max_items_per_view:
+                more = len(items) - self.opts.max_items_per_view
                 eid = self._new_id("e")
                 g.add_node(VisualNode(eid, NodeKind.ELLIPSIS, f"… (+{more} attrs)", {"more": more}))
                 g.add_edge(VisualEdge(nid, eid, type=EdgeKind.ATTR, label="more"))
@@ -188,14 +188,14 @@ class VisualIRExtractor:
             g.add_edge(VisualEdge(parent_id, eid, type=EdgeKind.CONTAINS, label="empty"))
             return
 
-        limit = min(n, self.opts.max_items)
+        limit = min(n, self.opts.max_items_per_view)
         for i in range(limit):
-            # 关键：不给 hint，这样 scalar 子节点就是 "5"，不是 "[4]=5"
+            # Important: omit the hint so scalar children remain "5" instead of "[4]=5".
             child_id = self._visit(seq[i], g, depth + 1, hint=None)
             g.add_edge(VisualEdge(parent_id, child_id, type=EdgeKind.INDEX, label=str(i)))
 
-        if n > self.opts.max_items:
-            more = n - self.opts.max_items
+        if n > self.opts.max_items_per_view:
+            more = n - self.opts.max_items_per_view
             eid = self._new_id("e")
             g.add_node(VisualNode(eid, NodeKind.ELLIPSIS, f"… (+{more} items)", {"more": more}))
             g.add_edge(VisualEdge(parent_id, eid, type=EdgeKind.CONTAINS, label="more"))
@@ -209,7 +209,7 @@ class VisualIRExtractor:
             return
 
         items = list(d.items())
-        limit = min(len(items), self.opts.max_items)
+        limit = min(len(items), self.opts.max_items_per_view)
 
         for i in range(limit):
             k, val = items[i]
@@ -223,8 +223,8 @@ class VisualIRExtractor:
             g.add_edge(VisualEdge(entry_id, key_id, type=EdgeKind.KEY, label="key"))
             g.add_edge(VisualEdge(entry_id, val_id, type=EdgeKind.VALUE, label="val"))
 
-        if len(items) > self.opts.max_items:
-            more = len(items) - self.opts.max_items
+        if len(items) > self.opts.max_items_per_view:
+            more = len(items) - self.opts.max_items_per_view
             eid = self._new_id("e")
             g.add_node(VisualNode(eid, NodeKind.ELLIPSIS, f"… (+{more} entries)", {"more": more}))
             g.add_edge(VisualEdge(parent_id, eid, type=EdgeKind.CONTAINS, label="more"))
@@ -237,7 +237,7 @@ class VisualIRExtractor:
             return
 
         items = list(s)
-        limit = min(len(items), self.opts.max_items)
+        limit = min(len(items), self.opts.max_items_per_view)
         for i in range(limit):
             child_id = self._visit(items[i], g, depth + 1, hint=None)
             g.add_edge(VisualEdge(parent_id, child_id, type=EdgeKind.CONTAINS, label=None))

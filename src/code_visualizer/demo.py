@@ -325,7 +325,7 @@ def configure_demo_view_overrides(config: VisualizerConfig) -> None:
 
     config.view_map.clear()
     config.view_name_map.clear()
-    config.nested_depth_map.clear()
+    config.recursion_depth_map.clear()
 
     overrides: dict[str, ViewKind] = {
         "arr": ViewKind.ARRAY_CELLS,
@@ -363,7 +363,7 @@ def configure_demo_view_overrides(config: VisualizerConfig) -> None:
     for key, view in overrides.items():
         set_view_override(config, key, view)
 
-    config.nested_depth_map.update(
+    config.recursion_depth_map.update(
         {
             "nested": 3,
             "nested_embed": 3,
@@ -416,9 +416,9 @@ def main() -> None:
     OUTPUT_DIR.mkdir(exist_ok=True)
     demo_config = default_visualizer_config()
     configure_demo_view_overrides(demo_config)
-    print("\n=== 模块划分提示 ===")
-    print("graph_builder -> graph_view_builder (array/matrix/tree/hash_table/heap_dual 等)")
-    print("renderers 保留 image/bar/scalar 等原子视图，负责最终 Graphviz 输出")
+    print("\n=== module layout tips ===")
+    print("graph_builder -> graph_view_builder (array/matrix/tree/hash_table/heap_dual etc.)")
+    print("renderers own the atomic image/bar/scalar views and emit Graphviz output")
 
     # 1) list[int] -> array cells (default auto)
     arr = [3, 1, 2, 4, 1, 5]
@@ -674,7 +674,7 @@ def main() -> None:
     for case in STEP_TRACER_CASES:
         print(f"\n=== step-tracer: {case['label']} ===")
         if tracer_missing:
-            print("step-tracer 未安装，跳过剩余示例")
+            print("step-tracer is missing, skipping remaining examples")
             break
         try:
             tracer_events = trace_algorithm(
@@ -683,7 +683,7 @@ def main() -> None:
                 max_events=case.get("max_events"),
             )
         except StepTracerUnavailableError as exc:
-            print(f"step-tracer 未安装，跳过动态跟踪示例: {exc}")
+            print(f"step-tracer is missing, skipping dynamic trace demos: {exc}")
             tracer_missing = True
             break
         traces = build_traces(tracer_events)
@@ -698,7 +698,7 @@ def main() -> None:
                 continue
             data_trace = traces.get(target_name)
             if data_trace is None:
-                print(f"{target_name} 未捕获，跳过")
+                print(f"{target_name} not captured, skipping")
                 continue
             trace_arts = visualize_trace(
                 data_trace,
@@ -713,7 +713,7 @@ def main() -> None:
                 )
                 print(f"{target_name} frame {idx}: {trace_path}")
             if not trace_arts:
-                print(f"{target_name} 没有可用帧")
+                print(f"{target_name} has no available frames")
 
 
 if __name__ == "__main__":

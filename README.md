@@ -4,6 +4,8 @@ Graphviz-first helpers for turning arbitrary Python values into consistent visua
 
 ## Highlights
 - Graphviz-first renderers cover arrays, matrices, tables, trees, graphs, heaps, linked lists, hash tables, and fallback node-link IRs.
+- Unified titles: even multi-node tree/graph renderers now share the same top-centered captions as HTML views, so gallery assets feel consistent.
+- Scalar-friendly cards: plain strings/bools/numbers render as minimalist cards, which keeps StepTracer traces readable when you mix scalars with structural payloads.
 - Functional API: `visualize`, `visualize_trace`, and `visualize_traces` only depend on the `VisualizerConfig` instance you pass in.
 - `ViewKind` enums and structured override maps replace ad-hoc strings so IDEs and type-checkers can validate inputs.
 - Converter pipelines (NumPy, pandas, or user supplied) run once per recursion layer, enabling seamless handling of nested arrays or custom tensor objects.
@@ -23,9 +25,8 @@ Graphviz-first helpers for turning arbitrary Python values into consistent visua
 ## Installation
 
 ### Requirements
-- Python 3.11+ for the core package (StepTracer itself currently targets Python 3.12+).
+- Python 3.12+ (StepTracer & Query Engine require 3.12, so the entire package targets 3.12+).
 - The `graphviz` Python package plus the Graphviz CLI tools (`dot`, `neato`, ...). Install via Homebrew (`brew install graphviz`), `apt`, etc.
-- Optional: `step-tracer` (install from Git) when you want execution tracing.
 
 ### Pip install
 ```bash
@@ -75,16 +76,36 @@ for i in range(len(data)):
         break
 """
 
-tracer = trace_algorithm(snippet, watch_variables=[
+events = trace_algorithm(snippet, watch_variables=[
     "data",
     {"name": "swapped", "line_number": 4},
     WatchFilter(name="queue_state", scope_id=1),
 ])
-traces = build_traces(tracer.events)
+traces = build_traces(events)
 config = default_visualizer_config()
 frames = visualize_trace(traces["data"], config=config)
 ```
 Use dictionaries or `WatchFilter` instances (with `name`, `scope_id`, and `line_number`) to disambiguate variables that share the same identifier but live in different scopes.
+
+### Integrated one-call visualization
+```python
+from code_visualizer import default_visualizer_config, visualize_algorithm, ViewKind
+
+config = default_visualizer_config()
+config.view_name_map["dp"] = ViewKind.MATRIX
+
+artifacts = visualize_algorithm(
+    snippet,
+    watch_variables=[
+        {"name": "data"},
+        {"name": "queue_state", "scope_id": 1},
+    ],
+    config=config,
+    max_frames=3,
+)
+# artifacts["data"][0] already contains the rendered Graphviz source
+```
+`visualize_algorithm()` wraps `trace_algorithm()`, `build_traces()`, and `visualize_traces()` so library consumers only call a single function when they want to run code + render variable snapshots.
 
 ## Demo gallery
 Run the end-to-end showcase to regenerate every artifact (array layouts, graph mappings with edge labels, DP matrices, numpy-nested payloads, and several StepTracer cases such as bubble sort, BFS queue state, DP tables, and graph snapshots):
@@ -122,10 +143,11 @@ atom    := list | tuple | set | frozenset | dict | int | float | bool | number
 Examples: `list[number]` for numeric arrays, `tuple[list]` for matrices, `dict[str, any]` for key-value tables, `linked_list`, `tree`.
 
 ### Nested depth, layout, and format
-- `nested_depth_default` / `nested_depth_map` limit how deeply list/dict payloads expand inside HTML table renderers.
-- `auto_nested_depth_cap` prevents runaway recursion in arbitrarily deep payloads.
+- `recursion_depth_default` / `recursion_depth_map` limit how deeply list/dict payloads expand inside HTML table renderers.
+- `auto_recursion_depth_cap` prevents runaway recursion in arbitrarily deep payloads.
 - `output_format` (`"svg"`, `"png"`, or `"jpg"`) guides helper utilities such as `demo.save_artifact()`; `allowed_output_formats` guards invalid requests.
-- `visualize(..., direction="LR" | "TB")` lets you control Graphviz rank direction without mutating config-level defaults.
+- `graph_direction` sets the default Graphviz `rankdir` (`"LR"` or `"TB"`) for node-link fallbacks.
+- `max_depth` / `max_items_per_view` control how far Visual IR extraction recurses and how many siblings are rendered before collapsing to ellipses.
 
 ## Converter pipeline
 Converters run before every view selection, one recursion layer at a time. The default pipeline already supports:
@@ -170,25 +192,39 @@ Tree tips: supply `.children` or dicts with `children` plus optional `label` / `
    - plain strings (`"data"`),
    - dicts `{"name": "queue_state", "scope_id": 5, "line_number": 23}` for disambiguation,
    - or `WatchFilter` instances. Mix them freely to handle duplicate variable names that appear in different scopes or lines.
-3. `build_traces(events, name_factory=...)` groups snapshots per variable and returns `Trace` objects.
-4. `visualize_trace(trace, config=..., max_frames=..., direction="LR")` renders each frame via the same `visualize()` helper.
-5. `visualize_traces(traces.values(), config=...)` bulk-renders everything, returning a `{name: [Artifact, ...]}` map.
+3. `query-engine` filters/sorts StepTracer snapshots according to those rules so we do not maintain bespoke loops.
+4. `build_traces(events, name_factory=...)` groups snapshots per variable and returns `Trace` objects.
+5. `visualize_trace(trace, config=..., max_frames=...)` renders each frame via the same `visualize()` helper.
+6. `visualize_traces(traces.values(), config=...)` bulk-renders everything, returning a `{name: [Artifact, ...]}` map.
 
 If `step-tracer` is missing, the helpers raise `StepTracerUnavailableError` with installation hints.
 
 ## Public API reference
 - `default_visualizer_config()` – factory for fresh configs.
 - `VisualizerConfig.with_converters()` / `.copy()` – scoped mutations.
-- `visualize(value, *, name, config, direction="LR")` – render arbitrary payloads.
-- `visualize_trace(trace, *, config, max_frames=None, direction="LR")` – replay a single StepTracer trace.
-- `visualize_traces(traces, *, config, max_frames=None, direction="LR")` – convenience wrapper for multiple traces.
+- `visualize(value, *, name, config)` – render arbitrary payloads.
+- `visualize_trace(trace, *, config, max_frames=None)` – replay a single StepTracer trace.
+- `visualize_traces(traces, *, config, max_frames=None)` – convenience wrapper for multiple traces.
 - `trace_algorithm(source, *, watch_variables=None)` – run StepTracer (requires Python 3.12+).
+- `visualize_algorithm(source, *, watch_variables=None, config=None, max_frames=None)` – run StepTracer and render artifacts in one step.
 - `build_traces(events, name_factory=None)` – convert raw events to `Trace` objects.
 - `ViewKind` enum – strongly typed view identifiers for overrides and rendering decisions.
 
 ## Troubleshooting
 - **"No module named graphviz"** – ensure you installed both the Python package (`pip install graphviz`) and the Graphviz system binary (`brew install graphviz`, `apt install graphviz`, ...). Re-run `pip install -e .` inside your virtualenv afterwards.
 - **StepTracer requires Python >=3.12** – create a dedicated env (e.g., `uv venv -p 3.12 .venv312 && source .venv312/bin/activate`) before installing `step-tracer` from Git.
+- **`query-engine` missing** – install via `pip install git+https://github.com/edcraft-org/query-engine.git` (it pulls `step-tracer` as well). The StepTracer helpers rely on it to filter and order snapshots.
 - **`pip` missing inside a new env** – run `python -m ensurepip --upgrade` and retry `python -m pip install -e .`.
 - **Graph payload not detected** – either conform to the `{nodes, edges, directed}` mapping shown above or register a custom converter that rewrites your structure into that shape.
 - **Need different configs per visualization** – instantiate a new config via `default_visualizer_config()` or `config.copy()` rather than mutating a module-level singleton. This keeps concurrent notebooks or services from tripping over shared state.
+
+## Roadmap: Phase 2 (Web)
+We’re actively shaping a second-stage "web mode" so the same Graphviz-first pipeline can play nicely with browsers:
+
+- **Animated traces** – experiment with [magjac/d3-graphviz](https://github.com/magjac/d3-graphviz) to animate a variable across frames (e.g., `queue_state [step 1..N]`). Not every view maps cleanly to SVG animation yet, so we’re prototyping fallbacks.
+- **Deployment options** – evaluate two integration paths:
+  1. Ship the Python library alongside a thin frontend (JupyterLite, Pyodide, or custom WASM runner) so browsers execute the exact same Python renderers.
+  2. Keep Python on the server, stream rendered DOT/SVG/PNG artifacts (or Graphviz JSON) to a JS client, and let the client animate or stitch frames.
+- **API surface for the web** – define a richer payload format (step metadata, transitions, frame durations) so frontends have enough context to animate without guessing.
+
+Feedback is welcome—open an issue if you want to collaborate on the browser-facing workflow or have ideas for animation-friendly payloads.

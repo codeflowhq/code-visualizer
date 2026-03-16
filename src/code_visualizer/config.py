@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Any, Mapping, Sequence
+from typing import Any, Literal, Mapping, Sequence
 
 from .converters import ConverterPipeline, ValueConverter, default_converter_pipeline
 from .view_types import ViewKind, ViewOverrideMap, ensure_view_kind
 
 
-def _default_nested_depth_map() -> dict[str | type[Any], int]:
+def _default_recursion_depth_map() -> dict[str | type[Any], int]:
     return {list: 4, tuple: 4, dict: 4}
 
 
@@ -24,12 +24,15 @@ class VisualizerConfig:
     view_map: dict[str | type[Any], ViewKind] = field(default_factory=dict)
     view_name_map: dict[str, ViewKind] = field(default_factory=dict)
     view_type_map: dict[str, ViewKind] = field(default_factory=dict)
-    nested_depth_default: int = -1
-    nested_depth_map: dict[str | type[Any], int] = field(default_factory=_default_nested_depth_map)
-    auto_nested_depth_cap: int = 6
+    recursion_depth_default: int = -1
+    recursion_depth_map: dict[str | type[Any], int] = field(default_factory=_default_recursion_depth_map)
+    auto_recursion_depth_cap: int = 6
+    max_depth: int = 3
+    max_items_per_view: int = 50
     output_format: str = "png"
     allowed_output_formats: set[str] = field(default_factory=_default_allowed_formats)
     converter_pipeline: ConverterPipeline = field(default_factory=default_converter_pipeline)
+    graph_direction: Literal["LR", "TB"] = "LR"
 
     def ensure_output_format(self, fmt: str | None) -> str:
         """Clamp requested output formats to the allowed list."""
@@ -63,7 +66,7 @@ class VisualizerConfig:
             view_map=dict(self.view_map),
             view_name_map=dict(self.view_name_map),
             view_type_map=dict(self.view_type_map),
-            nested_depth_map=dict(self.nested_depth_map),
+            recursion_depth_map=dict(self.recursion_depth_map),
             allowed_output_formats=set(self.allowed_output_formats),
             converter_pipeline=ConverterPipeline(self.converter_pipeline.converters),
         )

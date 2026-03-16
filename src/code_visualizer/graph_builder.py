@@ -1,40 +1,25 @@
 # graph_builder.py
 from __future__ import annotations
 
-from typing import Any, Callable, Literal, Mapping
+from typing import Any, Callable, Literal
 
 from .visual_ir import VisualIRExtractor, ExtractOptions
 from .config import VisualizerConfig, default_visualizer_config
 from .converters import ConverterPipeline
-from .models import Anchor, AnchorKind, Artifact, ArtifactKind
-from .renderers import (
-    choose_view,
-    render_graphviz_bar,
-    render_graphviz_image,
-    render_graphviz_node_link,
-    render_graphviz_scalar,
-)
+from .models import Anchor, AnchorKind, Artifact, ArtifactKind, NodeKind, VisualGraph, VisualNode
+from .renderers import choose_view, render_graphviz_node_link
 from .view_types import ViewKind, ViewOverrideMap
 from .view_utils import (
     VisualizationImageError,
     _auto_nested_depth,
+    _format_scalar_html,
     _is_scalar_value,
     _match_named_override,
     _match_type_pattern_override,
 )
-from .graph_view_builder import build_graph_view
+from .graph_view_builder import STRUCTURED_VIEW_KINDS, build_graph_view
 
-
-HTML_EMBED_VIEWS: set[ViewKind] = {
-    ViewKind.ARRAY_CELLS,
-    ViewKind.TABLE,
-    ViewKind.MATRIX,
-    ViewKind.HASH_TABLE,
-    ViewKind.LINKED_LIST,
-    ViewKind.TREE,
-    ViewKind.GRAPH,
-    ViewKind.HEAP_DUAL,
-}
+DirectionLiteral = Literal["LR", "TB"]
 
 def _make_value_coercer(config: VisualizerConfig) -> Callable[[Any], Any]:
     pipeline: ConverterPipeline = config.converter_pipeline
@@ -62,30 +47,25 @@ def _apply_view_override(name: str, value: Any, view_map: ViewOverrideMap | None
 
     return None
 
-def _resolve_nested_depth(
+def _resolve_recursion_depth(
     name: str,
     value: Any,
-    explicit_depth: int | None,
-    nested_depth_map: Mapping[str | type[Any], int] | None,
     config: VisualizerConfig,
 ) -> int:
-    if explicit_depth is not None:
-        resolved = explicit_depth
+    depth_map = config.recursion_depth_map
+    if name in depth_map:
+        resolved = depth_map[name]
     else:
-        depth_map = nested_depth_map or config.nested_depth_map
-        if name in depth_map:
-            resolved = depth_map[name]
-        else:
-            resolved = None
-            for key, depth in depth_map.items():
-                if isinstance(key, type) and isinstance(value, key):
-                    resolved = depth
-                    break
-            if resolved is None:
-                resolved = config.nested_depth_default
+        resolved = None
+        for key, depth in depth_map.items():
+            if isinstance(key, type) and isinstance(value, key):
+                resolved = depth
+                break
+        if resolved is None:
+            resolved = config.recursion_depth_default
 
     if resolved < 0:
-        cap = config.auto_nested_depth_cap
+        cap = config.auto_recursion_depth_cap
         return _auto_nested_depth(value, cap)
 
     return max(0, resolved)
@@ -109,7 +89,63 @@ def _determine_view(
     return choose_view(coerced_value), False
 
 
+def _render_structured_view(
+    *,
+    view: ViewKind,
+    name: str,
+    value: Any,
+    direction: Literal["LR", "TB"],
+    recursion_budget: int,
+    item_limit: int,
+    configured_view: bool,
+    value_coercer: Callable[[Any], Any],
+    view_resolver: Callable[[str, Any, Any], tuple[ViewKind, bool]],
+) -> tuple[Artifact | None, bool]:
+    if view not in STRUCTURED_VIEW_KINDS:
+        return None, False
+    try:
+        root_id, nested_graph = build_graph_view(
+            value,
+            name,
+            view,
+            recursion_budget,
+            item_limit=item_limit,
+            value_coercer=value_coercer,
+            view_resolver=view_resolver,
+        )
+    except (TypeError, VisualizationImageError):
+        if configured_view:
+            raise
+        return None, True
 
+    anchor_meta: dict[str, Any] = {}
+    if view == ViewKind.GRAPH:
+        anchor_meta["connect"] = False
+    nested_graph.anchors.append(Anchor(name=name, node_id=root_id, kind=AnchorKind.VAR, meta=anchor_meta))
+    graph_direction = "TB" if view in {ViewKind.TREE, ViewKind.HASH_TABLE} else direction
+    graph_dot = render_graphviz_node_link(nested_graph, direction=graph_direction)
+    return Artifact(ArtifactKind.GRAPHVIZ, graph_dot, title=f"{name}: {view.value}"), True
+
+
+
+
+
+def _render_scalar_artifact(name: str, value: Any, direction: DirectionLiteral) -> Artifact:
+    g = VisualGraph()
+    node_id = "scalar_value"
+    g.add_node(
+        VisualNode(
+            node_id,
+            NodeKind.OBJECT,
+            _format_scalar_html(value),
+            {"html_label": True, "node_attrs": {"shape": "plain"}},
+        )
+    )
+    return Artifact(
+        ArtifactKind.GRAPHVIZ,
+        render_graphviz_node_link(g, direction=direction),
+        title=f"{name}: value",
+    )
 
 
 # Unified API: value -> static Artifact (Graphviz/Markdown)
@@ -119,11 +155,6 @@ def visualize(
     value: Any,
     *,
     name: str = "x",
-    max_depth: int = 3,
-    max_items: int = 50,
-    direction: Literal["LR", "TD"] = "LR",
-    nested_depth: int | None = None,
-    nested_depth_map: Mapping[str | type[Any], int] | None = None,
     config: VisualizerConfig | None = None,
 ) -> Artifact:
     """
@@ -137,15 +168,14 @@ def visualize(
     (isinstance overrides). If none of these match, `renderers.choose_view`
     infers a fallback ViewKind.
 
-    `nested_depth` controls how many nested list/dict levels are expanded inside
-    HTML-based renderers (array/table). If not provided, the function consults
-    `nested_depth_map` and finally `config.nested_depth_default`. Supplying a
-    negative value instructs the renderer to auto-infer the necessary depth,
-    bounded by `config.auto_nested_depth_cap`. Provide a custom
-    `VisualizerConfig` via `config=` to override defaults without relying on
-    module-level globals.
+    HTML-based renderers (array/table) obey `config.recursion_depth_default` and the
+    `recursion_depth_map` overrides, both of which users can mutate on the config
+    instance. Provide a custom `VisualizerConfig` via `config=` to override
+    defaults without relying on module-level globals. `graph_direction`,
+    `max_depth`, and `max_items_per_view` are likewise drawn from the config.
     """
     cfg = config.copy() if config is not None else default_visualizer_config()
+    resolved_direction: DirectionLiteral = cfg.graph_direction
     value_coercer = _make_value_coercer(cfg)
 
     original_value = value
@@ -156,68 +186,34 @@ def visualize(
 
     view, configured_view = _determine_view(name, original_value, value, cfg)
 
-    depth_budget = _resolve_nested_depth(name, original_value, nested_depth, nested_depth_map, cfg)
+    recursion_budget = _resolve_recursion_depth(name, original_value, cfg)
 
-    # Specialized views (from raw value)
-    if view in HTML_EMBED_VIEWS:
-        try:
-            root_id, nested_graph = build_graph_view(
-                value,
-                name,
-                view,
-                depth_budget,
-                max_items=max_items,
-                value_coercer=value_coercer,
-                view_resolver=_resolver,
-            )
-        except TypeError:
-            if configured_view:
-                raise
-            view = ViewKind.NODE_LINK
-        else:
-            anchor_meta: dict[str, Any] = {}
-            if view == ViewKind.GRAPH:
-                anchor_meta["connect"] = False
-            nested_graph.anchors.append(Anchor(name=name, node_id=root_id, kind=AnchorKind.VAR, meta=anchor_meta))
-            graph_direction = "TD" if view in {ViewKind.TREE, ViewKind.HASH_TABLE} else direction
-            graph_dot = render_graphviz_node_link(nested_graph, direction=graph_direction)
-            return Artifact(ArtifactKind.GRAPHVIZ, graph_dot, title=f"{name}: {view.value}")
+    artifact, handled = _render_structured_view(
+        view=view,
+        name=name,
+        value=value,
+        direction=resolved_direction,
+        recursion_budget=recursion_budget,
+        item_limit=cfg.max_items_per_view,
+        configured_view=configured_view,
+        value_coercer=value_coercer,
+        view_resolver=_resolver,
+    )
+    if artifact is not None:
+        return artifact
+    if handled:
+        view = ViewKind.NODE_LINK
 
-    if view == ViewKind.IMAGE:
-        try:
-            return Artifact(ArtifactKind.GRAPHVIZ, render_graphviz_image(value, title=name), title=f"{name}: image")
-        except VisualizationImageError:
-            if configured_view:
-                raise
-            view = ViewKind.NODE_LINK
-
-    if view == ViewKind.BAR:
-        if not isinstance(value, list):
-            if configured_view:
-                raise TypeError("bar view expects a list of numbers")
-            view = ViewKind.NODE_LINK
-        else:
-            return Artifact(
-                ArtifactKind.GRAPHVIZ,
-                render_graphviz_bar(value, title=name, max_items=max_items),
-                title=f"{name}: bar",
-            )
-
-    # Fallback: VisualIR node-link (generic)
-    if view == ViewKind.NODE_LINK and _is_scalar_value(value):
-        return Artifact(
-            ArtifactKind.GRAPHVIZ,
-            render_graphviz_scalar(value, title=name, nested_depth=depth_budget, max_items=max_items),
-            title=f"{name}: scalar",
-        )
+    if _is_scalar_value(value):
+        return _render_scalar_artifact(name, value, resolved_direction)
 
     extractor = VisualIRExtractor(
-        ExtractOptions(max_depth=max_depth, max_items=max_items),
+        ExtractOptions(max_depth=cfg.max_depth, max_items=cfg.max_items_per_view),
         value_coercer=value_coercer,
     )
     g = extractor.extract(value, name=name)
     return Artifact(
         ArtifactKind.GRAPHVIZ,
-        render_graphviz_node_link(g, direction=direction),
+        render_graphviz_node_link(g, direction=resolved_direction),
         title=f"{name}: node_link",
     )

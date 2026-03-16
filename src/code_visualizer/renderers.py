@@ -80,11 +80,23 @@ def choose_view(value: Any) -> ViewKind:
 def render_graphviz_node_link(g: VisualGraph, direction: Literal["LR", "TD"] = "LR") -> str:
     rankdir = "LR" if direction == "LR" else "TB"
     dot = Digraph("G")
-    dot.attr("graph", rankdir=rankdir, nodesep="0.6", ranksep="0.7")
+    graph_attrs = {"rankdir": rankdir, "nodesep": "0.6", "ranksep": "0.7"}
+    graph_attrs.update({k: str(v) for k, v in g.graph_attrs.items()})
+    dot.attr("graph", **graph_attrs)
     dot.attr("node", shape="box", style="rounded,filled", fillcolor="#ffffff", color="#1f2933", fontname="Helvetica")
     dot.attr("edge", color="#4b5563", fontname="Helvetica")
 
     rank_groups: dict[str, list[str]] = defaultdict(list)
+    min_rank: list[str] = []
+    max_rank: list[str] = []
+
+    def _assign_rank(spec: str, node_id: str) -> None:
+        if spec == "min":
+            min_rank.append(node_id)
+        elif spec == "max":
+            max_rank.append(node_id)
+        else:
+            rank_groups[spec].append(node_id)
 
     for nid in sorted(g.nodes.keys()):
         node = g.nodes[nid]
@@ -98,11 +110,11 @@ def render_graphviz_node_link(g: VisualGraph, direction: Literal["LR", "TD"] = "
             dot.node(str(nid), label=label, **node_attrs)
         rank_spec = node.meta.get("rank")
         if isinstance(rank_spec, str):
-            rank_groups[rank_spec].append(str(nid))
+            _assign_rank(rank_spec, str(nid))
         elif isinstance(rank_spec, (list, tuple, set)):
             for spec in rank_spec:
                 if isinstance(spec, str):
-                    rank_groups[spec].append(str(nid))
+                    _assign_rank(spec, str(nid))
 
     for e in g.edges:
         attrs = dict(e.meta.get("edge_attrs", {}))
@@ -116,19 +128,14 @@ def render_graphviz_node_link(g: VisualGraph, direction: Literal["LR", "TD"] = "
             attrs["label"] = dot_escape_label(e.label)
         dot.edge(str(e.src), str(e.dst), **attrs)
 
-    for a in g.anchors:
-        aid = f"anchor_{a.name}"
-        label = dot_escape_label(a.name)
-        dot.node(aid, label=label, shape="plaintext", fontcolor="#6b7280")
-        connect = a.meta.get("connect", True)
-        if connect:
-            dot.edge(aid, str(a.node_id), style="dashed", color="#9ca3af")
-        else:
-            dot.body.append(f"{{rank=min; {aid};}}")
-
     for group, members in rank_groups.items():
         if len(members) > 1:
             dot.body.append(f"{{rank=same; {' '.join(members)} }}")
+
+    if min_rank:
+        dot.body.append(f"{{rank=min; {' '.join(min_rank)} }}")
+    if max_rank:
+        dot.body.append(f"{{rank=max; {' '.join(max_rank)} }}")
 
     return dot.source
 
@@ -318,16 +325,15 @@ def render_graphviz_table(
     return dot.source
 
 
-def build_rooted_tree_graph(
+def build_tree(
     root: Any,
     *,
     name: str = "root",
     max_nodes: int = 80,
     nested_depth: int = 0,
     max_items: int = 50,
-) -> VisualGraph:
+) -> tuple[str, VisualGraph]:
     g = VisualGraph()
-    g.anchors.append(Anchor(name=name, node_id="ROOT", kind=AnchorKind.VAR))
 
     counter = 0
     id_map: dict[int, str] = {}
@@ -339,8 +345,6 @@ def build_rooted_tree_graph(
             counter += 1
             id_map[ox] = f"t{counter}"
         return id_map[ox]
-
-    g.add_node(VisualNode("ROOT", NodeKind.OBJECT, f"{name}", {"kind": "tree_root"}))
 
     info_cache: dict[int, tuple[Any, list[Any]] | None] = {}
 
@@ -364,7 +368,6 @@ def build_rooted_tree_graph(
         return node_id
 
     root_id = ensure_node(root)
-    g.add_edge(VisualEdge("ROOT", root_id, type=EdgeKind.CONTAINS, label=None))
 
     stack = [root]
     seen: set[int] = set()
@@ -394,7 +397,7 @@ def build_rooted_tree_graph(
         g.add_node(VisualNode(eid, NodeKind.ELLIPSIS, "… (cutoff)", {"cutoff": True}))
         g.add_edge(VisualEdge(root_id, eid, type=EdgeKind.CONTAINS, label=None))
 
-    return g
+    return root_id, g
 
 
 

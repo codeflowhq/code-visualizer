@@ -73,6 +73,7 @@ class VisualGraph:
     nodes: dict[str, VisualNode] = field(default_factory=dict)
     edges: list[VisualEdge] = field(default_factory=list)
     anchors: list[Anchor] = field(default_factory=list)  # replaces roots
+    graph_attrs: dict[str, Any] = field(default_factory=dict)
 
     def add_node(self, node: VisualNode) -> None:
         self.nodes[node.id] = node

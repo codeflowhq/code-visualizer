@@ -7,11 +7,12 @@ from itertools import count
 from typing import Any, Callable, Iterator, Mapping
 
 from .models import EdgeKind, NodeKind, VisualEdge, VisualGraph, VisualNode
-from .renderers import build_rooted_tree_graph, render_graphviz_node_link
+from .renderers import build_tree, render_graphviz_node_link
 from .view_types import ViewKind
 from .view_utils import (
     _collect_linked_list_labels,
     _bar_chart_html,
+    _detect_image_source,
     _format_nested_value,
     _format_value_label,
     _graphviz_array_block,
@@ -30,7 +31,7 @@ from .view_utils import (
 ViewResolver = Callable[[str, Any, Any], tuple[ViewKind, bool]]
 BuilderRuntime = dict[str, Any]
 
-_NESTED_HTML_VIEWS: set[ViewKind] = {
+STRUCTURED_VIEW_KINDS: set[ViewKind] = {
     ViewKind.ARRAY_CELLS,
     ViewKind.TABLE,
     ViewKind.MATRIX,
@@ -40,8 +41,9 @@ _NESTED_HTML_VIEWS: set[ViewKind] = {
     ViewKind.GRAPH,
     ViewKind.HEAP_DUAL,
     ViewKind.BAR,
+    ViewKind.IMAGE,
 }
-_STRUCTURAL_VIEWS: set[ViewKind] = {
+RECURSIVE_VIEW_KINDS: set[ViewKind] = {
     ViewKind.TREE,
     ViewKind.LINKED_LIST,
     ViewKind.GRAPH,
@@ -56,24 +58,24 @@ def build_graph_view(
     view: ViewKind,
     depth: int,
     *,
-    max_items: int,
+    item_limit: int,
     value_coercer: Callable[[Any], Any] | None = None,
     view_resolver: ViewResolver | None = None,
 ) -> tuple[str, VisualGraph]:
-    runtime = _create_runtime(max_items, value_coercer, view_resolver)
+    runtime = _create_runtime(item_limit, value_coercer, view_resolver)
     coerced_value = runtime["coerce"](value)
     root_id = _build_view(runtime, coerced_value, name, view, depth)
     return root_id, runtime["graph"]
 
 
 def _create_runtime(
-    max_items: int,
+    item_limit: int,
     value_coercer: Callable[[Any], Any] | None,
     view_resolver: ViewResolver | None,
 ) -> BuilderRuntime:
     return {
         "graph": VisualGraph(),
-        "max_items": max_items,
+        "item_limit": item_limit,
         "coerce": value_coercer or (lambda x: x),
         "resolver": view_resolver,
         "counter": count(1),
@@ -139,13 +141,13 @@ def _select_nested_view(
     resolver: ViewResolver | None = runtime["resolver"]
     if resolver is not None:
         resolved_view, configured = resolver(slot_name, original_value, coerced_value)
-        if configured and resolved_view in _NESTED_HTML_VIEWS:
+        if configured and resolved_view in STRUCTURED_VIEW_KINDS:
             return resolved_view
-        if resolved_view in _STRUCTURAL_VIEWS:
+        if resolved_view in RECURSIVE_VIEW_KINDS:
             return resolved_view
 
     legacy_view = _legacy_nested_view(runtime, coerced_value)
-    if legacy_view in _STRUCTURAL_VIEWS:
+    if legacy_view in RECURSIVE_VIEW_KINDS:
         return legacy_view
     return None
 
@@ -155,7 +157,7 @@ def _legacy_nested_view(runtime: BuilderRuntime, value: Any) -> ViewKind | None:
         return None
     if _tree_children(value) is not None:
         return ViewKind.TREE
-    if _collect_linked_list_labels(value, min(8, runtime["max_items"])) is not None:
+    if _collect_linked_list_labels(value, min(8, runtime["item_limit"])) is not None:
         return ViewKind.LINKED_LIST
     if isinstance(value, list) and _looks_like_hash_table(value):
         return ViewKind.HASH_TABLE
@@ -187,7 +189,7 @@ def _make_nested_renderer(
             return inline_html
         child_id = _build_view(runtime, coerced, slot_name, next_view, max(0, depth_remaining))
         _add_edge(runtime, parent_id, child_id, tailport=port_name)
-        return "<font color='#2563eb'>&#10549;</font>"
+        return ""
 
     return _renderer
 
@@ -205,7 +207,7 @@ def _render_inline_child_view(
             slot_name,
             view,
             depth_remaining,
-            max_items=runtime["max_items"],
+            item_limit=runtime["item_limit"],
             value_coercer=runtime["coerce"],
             view_resolver=runtime["resolver"],
         )
@@ -238,18 +240,18 @@ def _build_array_view(runtime: BuilderRuntime, value: Any, name: str, depth: int
         raise TypeError("array_cells view expects list-like input")
 
     node_id = _new_node_id(runtime, "arr")
-    max_items = runtime["max_items"]
+    item_limit = runtime["item_limit"]
     depth_budget = max(0, depth)
     cell_depth = depth_budget - 1 if depth_budget > 0 else 0
 
     value_cells: list[str] = []
     index_cells: list[str] = []
-    limit = min(len(array), max_items)
+    limit = min(len(array), item_limit)
 
     for i in range(limit):
         port = f"{node_id}_item_{i}"
         nested_renderer = _make_nested_renderer(runtime, node_id, port, f"{name}[{i}]")
-        cell_html = _format_nested_value(array[i], cell_depth, max_items, nested_renderer, f"{name}[{i}]")
+        cell_html = _format_nested_value(array[i], cell_depth, item_limit, nested_renderer, f"{name}[{i}]")
         value_cells.append(
             f'<td port="{port}" align="center" bgcolor="#ffffff" cellpadding="4">{cell_html}</td>'
         )
@@ -257,7 +259,7 @@ def _build_array_view(runtime: BuilderRuntime, value: Any, name: str, depth: int
             f"<td align='center'><font color='#dc2626' point-size='12'>{html_escape(str(i))}</font></td>"
         )
 
-    if len(array) > max_items:
+    if len(array) > item_limit:
         value_cells.append('<td align="center" bgcolor="#ffffff">…</td>')
         index_cells.append('<td align="center"></td>')
 
@@ -270,9 +272,9 @@ def _build_table_view(runtime: BuilderRuntime, value: Any, name: str, depth: int
     if not isinstance(value, dict):
         raise TypeError("table view expects dict input")
 
-    max_items = runtime["max_items"]
+    item_limit = runtime["item_limit"]
     items = list(value.items())
-    limit = min(len(items), max_items)
+    limit = min(len(items), item_limit)
     node_id = _new_node_id(runtime, ViewKind.TABLE)
     depth_budget = max(0, depth)
     inner_depth = depth_budget - 1 if depth_budget > 0 else 0
@@ -282,12 +284,12 @@ def _build_table_view(runtime: BuilderRuntime, value: Any, name: str, depth: int
         key, val = items[idx]
         port = f"{node_id}_val_{idx}"
         nested_renderer = _make_nested_renderer(runtime, node_id, port, f"{name}.{key}")
-        val_html = _format_nested_value(val, inner_depth, max_items, nested_renderer, f"{name}.{key}")
+        val_html = _format_nested_value(val, inner_depth, item_limit, nested_renderer, f"{name}.{key}")
         rows.append(f"<tr><td>{_table_cell_text(key)}</td><td port='{port}'>{val_html}</td></tr>")
 
     if not items:
         rows.append("<tr><td colspan='2'>∅</td></tr>")
-    elif len(items) > max_items:
+    elif len(items) > item_limit:
         rows.append("<tr><td colspan='2'>… (+more)</td></tr>")
 
     table_html = f"<table border='1' cellborder='1' cellspacing='0'>{''.join(rows)}</table>"
@@ -305,13 +307,13 @@ def _build_matrix_view(runtime: BuilderRuntime, value: Any, name: str, depth: in
         rows.append(list(row))
 
     node_id = _new_node_id(runtime, ViewKind.MATRIX)
-    max_items = runtime["max_items"]
+    item_limit = runtime["item_limit"]
     depth_budget = max(0, depth)
     cell_depth = depth_budget - 1 if depth_budget > 0 else 0
     row_count = len(rows)
-    row_limit = min(row_count, min(max_items, 25))
+    row_limit = min(row_count, min(item_limit, 25))
     width = max((len(r) for r in rows), default=0)
-    col_limit = min(width, min(max_items, 25))
+    col_limit = min(width, min(item_limit, 25))
 
     body: list[str] = ["<table border='1' cellborder='1' cellspacing='0'>"]
     if row_count == 0:
@@ -336,7 +338,7 @@ def _build_matrix_view(runtime: BuilderRuntime, value: Any, name: str, depth: in
                 cell_html = _format_nested_value(
                     val,
                     cell_depth,
-                    max_items,
+                    item_limit,
                     nested_renderer,
                     f"{name}[{r_idx}][{c_idx}]",
                 )
@@ -361,14 +363,14 @@ def _build_hash_table_view(runtime: BuilderRuntime, value: Any, name: str, depth
         raise TypeError("hash_table view expects list input")
 
     graph = runtime["graph"]
-    max_items = runtime["max_items"]
+    item_limit = runtime["item_limit"]
     root_id = _new_node_id(runtime, "hash_root")
-    header = "<font color='#94a3b8' point-size='11'>hash_table</font>"
+    header = "<font color='#0f172a' point-size='11'><b>hash_table</b></font>"
     _add_html_node(runtime, root_id, _wrap_label(None, header, show_title=False))
 
     depth_budget = max(0, depth)
     chain_depth = depth_budget - 1 if depth_budget > 0 else 0
-    limit = min(len(value), max_items)
+    limit = min(len(value), item_limit)
     bucket_ids: list[str] = []
     bucket_rank_group = f"{root_id}_row"
 
@@ -415,8 +417,8 @@ def _populate_hash_bucket(
     name: str,
     depth_remaining: int,
 ) -> None:
-    max_items = runtime["max_items"]
-    entries, clipped = _hash_bucket_entries(bucket_value, min(max_items, 8))
+    item_limit = runtime["item_limit"]
+    entries, clipped = _hash_bucket_entries(bucket_value, min(item_limit, 8))
     prev = bucket_id
     slot_prefix = f"{name}[{idx}]"
     for j, entry in enumerate(entries):
@@ -488,8 +490,8 @@ def _build_bar_view(runtime: BuilderRuntime, value: Any, name: str, depth: int) 
     if not isinstance(value, (list, tuple)):
         raise TypeError("bar view expects list-like numeric input")
     seq = list(value)
-    max_items = runtime["max_items"]
-    limit = min(len(seq), max_items)
+    item_limit = runtime["item_limit"]
+    limit = min(len(seq), item_limit)
 
     numeric: list[float] = []
     labels: list[str] = []
@@ -512,8 +514,15 @@ def _build_bar_view(runtime: BuilderRuntime, value: Any, name: str, depth: int) 
     return node_id
 
 
+def _build_image_view(runtime: BuilderRuntime, value: Any, name: str, depth: int) -> str:
+    src = _detect_image_source(value, strict=True)
+    node_id = _new_node_id(runtime, ViewKind.IMAGE)
+    _add_html_node(runtime, node_id, _wrap_label(name, _image_html(src)))
+    return node_id
+
+
 def _build_linked_list_view(runtime: BuilderRuntime, value: Any, name: str, depth: int) -> str:
-    seq = _collect_linked_list_labels(value, runtime["max_items"])
+    seq = _collect_linked_list_labels(value, runtime["item_limit"])
     if seq is None:
         raise TypeError("linked_list view expects objects with .next")
     values, truncated = seq
@@ -521,7 +530,7 @@ def _build_linked_list_view(runtime: BuilderRuntime, value: Any, name: str, dept
     node_id = _new_node_id(runtime, "list")
     depth_budget = max(0, depth)
     cell_depth = depth_budget - 1 if depth_budget > 0 else 0
-    max_items = runtime["max_items"]
+    item_limit = runtime["item_limit"]
 
     if not values:
         html = "<table border='1' cellborder='1' cellspacing='0'><tr><td align='center'>∅</td></tr></table>"
@@ -530,7 +539,7 @@ def _build_linked_list_view(runtime: BuilderRuntime, value: Any, name: str, dept
         for idx, val in enumerate(values):
             port = f"{node_id}_node_{idx}"
             nested_renderer = _make_nested_renderer(runtime, node_id, port, f"{name}[{idx}]")
-            cell_html = _format_nested_value(val, cell_depth, max_items, nested_renderer, f"{name}[{idx}]")
+            cell_html = _format_nested_value(val, cell_depth, item_limit, nested_renderer, f"{name}[{idx}]")
             value_block = (
                 "<table border='1' cellborder='1' cellspacing='0'>"
                 f"<tr><td port='{port}' bgcolor='#ffffff' cellpadding='6'>{cell_html}</td></tr></table>"
@@ -565,7 +574,7 @@ def _build_heap_dual_view(runtime: BuilderRuntime, value: Any, name: str, depth:
     array_id = _build_array_view(runtime, value, f"{name}[array]", depth)
     _add_edge(runtime, container_id, array_id)
 
-    tree_payload = _heap_tree_payload(value, runtime["max_items"])
+    tree_payload = _heap_tree_payload(value, runtime["item_limit"])
     if tree_payload is not None:
         tree_id = _build_tree_view(runtime, tree_payload, f"{name}[tree]", depth)
         _add_edge(runtime, container_id, tree_id)
@@ -578,10 +587,10 @@ def _build_heap_dual_view(runtime: BuilderRuntime, value: Any, name: str, depth:
     return container_id
 
 
-def _heap_tree_payload(heap: list[Any], max_items: int) -> Any | None:
+def _heap_tree_payload(heap: list[Any], item_limit: int) -> Any | None:
     if not heap:
         return None
-    limit = min(len(heap), max_items)
+    limit = min(len(heap), item_limit)
 
     def build(idx: int) -> Any | None:
         if idx >= limit or idx >= len(heap):
@@ -628,10 +637,30 @@ def _merge_visual_graph(runtime: BuilderRuntime, other: VisualGraph, prefix: str
     return next(iter(mapping.values()))
 
 
+def _attach_view_title(runtime: BuilderRuntime, _: str, name: str, __: str) -> None:
+    if not name:
+        return
+    runtime_graph: VisualGraph = runtime["graph"]
+    runtime_graph.graph_attrs["label"] = f"<<font point-size='16' color='#0f172a'><b>{html_escape(name)}</b></font>>"
+    runtime_graph.graph_attrs.setdefault("labelloc", "t")
+    runtime_graph.graph_attrs.setdefault("labeljust", "c")
+    runtime_graph.graph_attrs.setdefault("fontname", "Helvetica")
+    runtime_graph.graph_attrs.setdefault("fontsize", "16")
+    runtime_graph.graph_attrs.setdefault("fontcolor", "#0f172a")
+
+
 def _build_tree_view(runtime: BuilderRuntime, value: Any, name: str, depth: int) -> str:
-    tg = build_rooted_tree_graph(value, name=name, max_nodes=runtime["max_items"], nested_depth=depth, max_items=runtime["max_items"])
+    root_hint, tg = build_tree(
+        value,
+        name=name,
+        max_nodes=runtime["item_limit"],
+        nested_depth=depth,
+        max_items=runtime["item_limit"],
+    )
     prefix = _new_node_id(runtime, ViewKind.TREE)
-    return _merge_visual_graph(runtime, tg, prefix, root_hint="ROOT")
+    merged_root = _merge_visual_graph(runtime, tg, prefix, root_hint=root_hint)
+    _attach_view_title(runtime, merged_root, name, "tree_label")
+    return merged_root
 
 
 def _build_graph_view(runtime: BuilderRuntime, value: Any, name: str, depth: int) -> str:
@@ -640,10 +669,10 @@ def _build_graph_view(runtime: BuilderRuntime, value: Any, name: str, depth: int
         raise TypeError("graph view expects a networkx graph or mapping with nodes/edges")
 
     nodes, edges, directed = graph_data
-    max_items = runtime["max_items"]
+    item_limit = runtime["item_limit"]
     depth_budget = max(0, depth)
     node_label_depth = depth_budget - 1 if depth_budget > 0 else 0
-    limit = min(len(nodes), max_items)
+    limit = min(len(nodes), item_limit)
     g = VisualGraph()
     container_id = _new_node_id(runtime, "graph_root")
     g.add_node(
@@ -656,11 +685,12 @@ def _build_graph_view(runtime: BuilderRuntime, value: Any, name: str, depth: int
     )
 
     id_map: dict[Any, str] = {}
+    node_ids: list[str] = []
     for idx, (key, payload) in enumerate(nodes[:limit]):
         label_text, is_html = _format_value_label(
             payload,
             node_label_depth,
-            max_items,
+            item_limit,
             None,
             f"{name}.nodes[{idx}]",
         )
@@ -671,8 +701,9 @@ def _build_graph_view(runtime: BuilderRuntime, value: Any, name: str, depth: int
         local_id = f"{container_id}_n{idx}"
         g.add_node(VisualNode(local_id, NodeKind.OBJECT, label_text, meta))
         id_map[key] = local_id
+        node_ids.append(local_id)
 
-    edge_limit = min(len(edges), max_items * 2)
+    edge_limit = min(len(edges), item_limit * 2)
     for src_key, dst_key, label in edges[:edge_limit]:
         sid = id_map.get(src_key)
         did = id_map.get(dst_key)
@@ -683,8 +714,21 @@ def _build_graph_view(runtime: BuilderRuntime, value: Any, name: str, depth: int
             edge_meta["edge_attrs"] = {"dir": "none"}
         g.add_edge(VisualEdge(sid, did, type=EdgeKind.LINK, label=label, meta=edge_meta))
 
+    if node_ids:
+        for node_id in node_ids:
+            g.add_edge(
+                VisualEdge(
+                    container_id,
+                    node_id,
+                    type=EdgeKind.LAYOUT,
+                    meta={"edge_attrs": {"style": "invis"}},
+                )
+            )
+
     prefix = _new_node_id(runtime, ViewKind.GRAPH)
-    return _merge_visual_graph(runtime, g, prefix, root_hint=container_id)
+    merged_root = _merge_visual_graph(runtime, g, prefix, root_hint=container_id)
+    _attach_view_title(runtime, merged_root, name, "graph_label")
+    return merged_root
 
 
 def _extract_graph_data(value: Any) -> tuple[list[tuple[Any, Any]], list[tuple[Any, Any, Any]], bool] | None:
@@ -772,4 +816,5 @@ _VIEW_BUILDERS: dict[ViewKind, Callable[[BuilderRuntime, Any, str, int], str]] =
     ViewKind.GRAPH: _build_graph_view,
     ViewKind.HEAP_DUAL: _build_heap_dual_view,
     ViewKind.BAR: _build_bar_view,
+    ViewKind.IMAGE: _build_image_view,
 }

@@ -7,6 +7,7 @@ from .step_tracing import (
     VariableTraceEvent,
     build_traces,
     trace_algorithm,
+    visualize_algorithm,
     visualize_trace,
     visualize_traces,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "build_traces",
     "default_visualizer_config",
     "trace_algorithm",
+    "visualize_algorithm",
     "visualize",
     "visualize_trace",
     "visualize_traces",

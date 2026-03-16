@@ -7,7 +7,7 @@ name = "code-visualizer"
 version = "0.1.0"
 description = "Graphviz-based visualization helpers for nested Python data structures."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [
     { name = "EdCraft Team" },
@@ -16,7 +16,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
@@ -26,6 +25,8 @@ dependencies = [
     "numpy>=2.1.0",
     "pandas>=2.2.0",
     "pillow>=10.4.0",
+    "step-tracer @ git+https://github.com/edcraft-org/step-tracer.git",
+    "query-engine @ git+https://github.com/edcraft-org/query-engine.git",
 ]
 
 [dependency-groups]
@@ -55,3 +56,6 @@ src = ["src"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "C90", "I", "N", "UP", "B", "A", "S", "T20", "Q"]
 ignore = ["S101", "S102", "E501"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
