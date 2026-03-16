@@ -110,7 +110,7 @@ STEP_TRACER_CASES: tuple[dict[str, Any], ...] = (
         "snippet": STEP_TRACER_SNIPPET,
         "watch": ["data"],
         "max_events": 6,
-        "max_frames": 4,
+        "max_steps": 4,
         "stem": "step_trace_sort",
     },
     {
@@ -118,7 +118,7 @@ STEP_TRACER_CASES: tuple[dict[str, Any], ...] = (
         "snippet": STEP_TRACER_BFS_SNIPPET,
         "watch": ["queue_state", "visited_nodes"],
         "max_events": 12,
-        "max_frames": 5,
+        "max_steps": 5,
         "stem": "step_trace_bfs",
     },
     {
@@ -126,7 +126,7 @@ STEP_TRACER_CASES: tuple[dict[str, Any], ...] = (
         "snippet": STEP_TRACER_DP_SNIPPET,
         "watch": ["dp_matrix"],
         "max_events": 12,
-        "max_frames": 5,
+        "max_steps": 5,
         "stem": "step_trace_dp",
     },
     {
@@ -134,7 +134,7 @@ STEP_TRACER_CASES: tuple[dict[str, Any], ...] = (
         "snippet": STEP_TRACER_GRAPH_SNIPPET,
         "watch": ["graph_snapshot"],
         "max_events": 10,
-        "max_frames": 5,
+        "max_steps": 5,
         "stem": "step_trace_graph",
     },
 )
@@ -703,7 +703,7 @@ def main() -> None:
             trace_arts = visualize_trace(
                 data_trace,
                 config=demo_config,
-                max_frames=case.get("max_frames"),
+                max_steps=case.get("max_steps"),
             )
             for idx, artifact in enumerate(trace_arts, start=1):
                 trace_path = save_artifact(

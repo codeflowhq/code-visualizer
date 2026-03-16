@@ -213,14 +213,15 @@ def visualize_trace(
     trace: Trace,
     *,
     config: VisualizerConfig | None = None,
-    max_frames: int | None = None,
+    max_steps: int | None = None,
 ) -> list[Artifact]:
-    """Render each trace frame via the main visualize() helper."""
+    """Render each trace step via the main visualize() helper."""
 
     cfg = config.copy() if config is not None else default_visualizer_config()
     artifacts: list[Artifact] = []
-    selected_frames = trace.frames if max_frames is None else trace.frames[: max(0, max_frames)]
-    for frame in selected_frames:
+    limit = cfg.step_limit_for(trace.name, override=max_steps)
+    selected_steps = trace.frames if limit is None else trace.frames[:limit]
+    for frame in selected_steps:
         slot_name = _format_trace_slot_name(trace.name, frame.step)
         base_override = cfg.view_name_map.get(trace.name)
         if base_override is not None and slot_name not in cfg.view_name_map:
@@ -233,13 +234,13 @@ def visualize_traces(
     traces: Iterable[Trace],
     *,
     config: VisualizerConfig | None = None,
-    max_frames: int | None = None,
+    max_steps: int | None = None,
 ) -> dict[str, list[Artifact]]:
     """Render multiple traces at once."""
 
     rendered: dict[str, list[Artifact]] = {}
     for trace in traces:
-        rendered[trace.name] = visualize_trace(trace, config=config, max_frames=max_frames)
+        rendered[trace.name] = visualize_trace(trace, config=config, max_steps=max_steps)
     return rendered
 
 
@@ -248,7 +249,7 @@ def visualize_algorithm(
     *,
     watch_variables: Sequence[WatchTarget] | None = None,
     config: VisualizerConfig | None = None,
-    max_frames: int | None = None,
+    max_steps: int | None = None,
     tracer: StepTracer | None = None,
     globals_dict: Mapping[str, Any] | None = None,
     name_factory: Callable[[str], str] | None = None,
@@ -262,7 +263,7 @@ def visualize_algorithm(
         globals_dict=globals_dict,
     )
     traces = build_traces(events, name_factory=name_factory)
-    return visualize_traces(traces.values(), config=config, max_frames=max_frames)
+    return visualize_traces(traces.values(), config=config, max_steps=max_steps)
 
 
 __all__ = [

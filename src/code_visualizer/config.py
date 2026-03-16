@@ -33,6 +33,8 @@ class VisualizerConfig:
     allowed_output_formats: set[str] = field(default_factory=_default_allowed_formats)
     converter_pipeline: ConverterPipeline = field(default_factory=default_converter_pipeline)
     graph_direction: Literal["LR", "TB"] = "LR"
+    trace_step_limit_default: int | None = None
+    trace_step_limit_map: dict[str, int] = field(default_factory=dict)
 
     def ensure_output_format(self, fmt: str | None) -> str:
         """Clamp requested output formats to the allowed list."""
@@ -69,7 +71,20 @@ class VisualizerConfig:
             recursion_depth_map=dict(self.recursion_depth_map),
             allowed_output_formats=set(self.allowed_output_formats),
             converter_pipeline=ConverterPipeline(self.converter_pipeline.converters),
+            trace_step_limit_map=dict(self.trace_step_limit_map),
         )
+
+    def step_limit_for(self, trace_name: str, override: int | None = None) -> int | None:
+        """Determine how many steps to render for a given trace name."""
+
+        if override is not None:
+            limit = override
+        else:
+            limit = self.trace_step_limit_map.get(trace_name, self.trace_step_limit_default)
+        if limit is None:
+            return None
+        return max(0, limit)
+
 
 
 def default_visualizer_config() -> VisualizerConfig:

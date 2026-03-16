@@ -44,17 +44,19 @@ The `pip install -e .` step also installs runtime dependencies such as `graphviz
 
 ## Quick start
 ## API usage refresher
-The current release ships a purely functional surface area—grab a fresh config for every session, mutate in place, then pass it into whichever helper you need:
+Everything still flows through a `VisualizerConfig` that you own. Create it once per session, mutate it locally, and hand it to the helpers below.
 
-- `default_visualizer_config()` – factory for a clean `VisualizerConfig`. Use `.copy()` when you want to fork an existing setup without touching the original.
-- `visualize(value, *, name, config)` – the one-stop renderer. It automatically applies converter pipelines each recursion layer, so nested NumPy/pandas objects remain supported.
-- `visualize_trace(trace, *, config, max_frames=None)` / `visualize_traces(traces, *, config, max_frames=None)` – drop-in renderers for `Trace` objects produced by StepTracer. Frame titles now render as `name [step N]` for quick scanning.
-- `visualize_algorithm(source, *, watch_variables, config, max_frames=None)` – runs StepTracer end to end (transform → execute → query engine filter → render) so users can call a single function.
-- `trace_algorithm()` + `build_traces()` – keep these handy if you need to post-process events before rendering. Watch filters accept strings, dicts, or `WatchFilter` instances to disambiguate duplicate variable names.
-- `VisualizerConfig.with_converters(...)` – compose converter pipelines (NumPy → list, pandas → dict, custom tensor adapters) at construction time. Converters fire once per recursion layer to avoid unnecessary copies.
+| Task | Entry point | Notes |
+|------|-------------|-------|
+| Fresh config | `default_visualizer_config()` / `config.copy()` | Every call returns an isolated config; `.copy()` lets you fork tweaks without touching the original. |
+| Render a Python value | `visualize(value, *, name, config)` | Converter pipeline fires at every recursion layer, so nested NumPy/pandas payloads are normalized before view selection. |
+| StepTracer trace → artifacts | `visualize_trace(trace, *, config, max_steps=None)` / `visualize_traces(...)` | Titles show `name [step N]`. Skip `max_steps` to fall back to `config.trace_step_limit_default` or per-variable entries in `config.trace_step_limit_map`. |
+| One-call “run + render” | `visualize_algorithm(source, *, watch_variables, config, max_steps=None)` | Wraps `trace_algorithm` → `build_traces` → `visualize_traces` so you can invoke a single function. |
+| Manual trace control | `trace_algorithm(...)` + `build_traces(...)` | Use when you need to filter/transform StepTracer events before rendering. `watch_variables` accepts strings, dicts (`{"name": ..., "scope_id": ..., "line_number": ...}`), or `WatchFilter` objects. |
+| Custom converters | `config.with_converters(...)` | Compose adapters (e.g., PyTorch tensors) either prepended or appended to the default NumPy/pandas pipeline. Converters run once per recursion level. |
+| Per-variable step caps | `config.trace_step_limit_default` / `trace_step_limit_map` | Optional budgets for trace rendering—great when `queue_state` should stop at 3 steps but `visited_nodes` can span 10. Combine with `max_steps` for one-off overrides. |
 
-With this pattern the README examples stay accurate even as we add more renderers—the entry points don’t change, and everything flows through a `VisualizerConfig` instance that you own.
-
+Stick to this flow and the rest of the README examples “just work”—the entry points stay stable even as new view kinds land.
 
 ### Direct data visualization
 ```python
@@ -95,7 +97,7 @@ events = trace_algorithm(snippet, watch_variables=[
 ])
 traces = build_traces(events)
 config = default_visualizer_config()
-frames = visualize_trace(traces["data"], config=config)
+step_artifacts = visualize_trace(traces["data"], config=config)
 ```
 Use dictionaries or `WatchFilter` instances (with `name`, `scope_id`, and `line_number`) to disambiguate variables that share the same identifier but live in different scopes.
 
@@ -113,7 +115,7 @@ artifacts = visualize_algorithm(
         {"name": "queue_state", "scope_id": 1},
     ],
     config=config,
-    max_frames=3,
+    max_steps=3,
 )
 # artifacts["data"][0] already contains the rendered Graphviz source
 ```
@@ -206,7 +208,7 @@ Tree tips: supply `.children` or dicts with `children` plus optional `label` / `
    - or `WatchFilter` instances. Mix them freely to handle duplicate variable names that appear in different scopes or lines.
 3. `query-engine` filters/sorts StepTracer snapshots according to those rules so we do not maintain bespoke loops.
 4. `build_traces(events, name_factory=...)` groups snapshots per variable and returns `Trace` objects.
-5. `visualize_trace(trace, config=..., max_frames=...)` renders each frame via the same `visualize()` helper.
+5. `visualize_trace(trace, config=..., max_steps=...)` renders each step via the same `visualize()` helper.
 6. `visualize_traces(traces.values(), config=...)` bulk-renders everything, returning a `{name: [Artifact, ...]}` map.
 
 If `step-tracer` is missing, the helpers raise `StepTracerUnavailableError` with installation hints.
@@ -215,10 +217,10 @@ If `step-tracer` is missing, the helpers raise `StepTracerUnavailableError` with
 - `default_visualizer_config()` – factory for fresh configs.
 - `VisualizerConfig.with_converters()` / `.copy()` – scoped mutations.
 - `visualize(value, *, name, config)` – render arbitrary payloads.
-- `visualize_trace(trace, *, config, max_frames=None)` – replay a single StepTracer trace.
-- `visualize_traces(traces, *, config, max_frames=None)` – convenience wrapper for multiple traces.
+- `visualize_trace(trace, *, config, max_steps=None)` – replay a single StepTracer trace.
+- `visualize_traces(traces, *, config, max_steps=None)` – convenience wrapper for multiple traces.
 - `trace_algorithm(source, *, watch_variables=None)` – run StepTracer (requires Python 3.12+).
-- `visualize_algorithm(source, *, watch_variables=None, config=None, max_frames=None)` – run StepTracer and render artifacts in one step.
+- `visualize_algorithm(source, *, watch_variables=None, config=None, max_steps=None)` – run StepTracer and render artifacts in one step.
 - `build_traces(events, name_factory=None)` – convert raw events to `Trace` objects.
 - `ViewKind` enum – strongly typed view identifiers for overrides and rendering decisions.
 
