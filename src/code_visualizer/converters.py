@@ -65,6 +65,12 @@ def pandas_converter(value: Any) -> ConverterResult:
     return False, value
 
 
+def deque_converter(value: Any) -> ConverterResult:
+    if isinstance(value, _deque):
+        return True, list(value)
+    return False, value
+
+
 def identity_converter(value: Any) -> ConverterResult:
     return False, value
 

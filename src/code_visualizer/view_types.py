@@ -12,15 +12,22 @@ class ViewKind(str, Enum):
     AUTO = "auto"
     NODE_LINK = "node_link"
     ARRAY_CELLS = "array_cells"
+    ARRAY_CELLS_NODE = "array_cells_node"  # compatibility alias
     MATRIX = "matrix"
+    MATRIX_NODE = "matrix_node"  # compatibility alias
     IMAGE = "image"
     BAR = "bar"
+    BAR_NODE = "bar_node"  # compatibility alias
     TABLE = "table"
+    TABLE_NODE = "table_node"  # compatibility alias
     TREE = "tree"
     GRAPH = "graph"
     HEAP_DUAL = "heap_dual"
+    HEAP_DUAL_NODE = "heap_dual_node"  # compatibility alias
     LINKED_LIST = "linked_list"
+    LINKED_LIST_NODE = "linked_list_node"  # compatibility alias
     HASH_TABLE = "hash_table"
+    HASH_TABLE_NODE = "hash_table_node"  # compatibility alias
 
     def __str__(self) -> str:  # pragma: no cover - Enum convenience
         return self.value

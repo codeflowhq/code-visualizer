@@ -159,7 +159,7 @@ Examples: `list[number]` for numeric arrays, `tuple[list]` for matrices, `dict[s
 ### Nested depth, layout, and format
 - `recursion_depth_default` / `recursion_depth_map` limit how deeply list/dict payloads expand inside HTML table renderers.
 - `auto_recursion_depth_cap` prevents runaway recursion in arbitrarily deep payloads.
-- `output_format` (`"svg"`, `"png"`, or `"jpg"`) guides helper utilities such as `demo.save_artifact()`; `allowed_output_formats` guards invalid requests.
+- `output_format` (`"dot"`, `"svg"`, `"png"`, or `"jpg"`) guides helper utilities such as `demo.save_artifact()`; use `"dot"` when you want raw Graphviz source instead of a rendered image. `allowed_output_formats` guards invalid requests.
 - `graph_direction` sets the default Graphviz `rankdir` (`"LR"` or `"TB"`) for node-link fallbacks.
 - `max_depth` / `max_items_per_view` control how far Visual IR extraction recurses and how many siblings are rendered before collapsing to ellipses.
 

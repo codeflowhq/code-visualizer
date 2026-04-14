@@ -1,36 +1,44 @@
 # renderers.py
+# mypy: disable-error-code=import-untyped,no-any-return,arg-type
 from __future__ import annotations
 
+import hashlib
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Literal
 
 from graphviz import Digraph
 
-from .view_types import ViewKind
-from .view_utils import (
-    VisualizationImageError,
-    NestedRenderer,
+from .models import (
+    EdgeKind,
+    NodeKind,
+    VisualEdge,
+    VisualGraph,
+    VisualNode,
+)
+from .utils.image_sources import _detect_image_source
+from .utils.structure_detection import (
     _collect_linked_list_labels,
-    _detect_image_source,
-    _format_nested_value,
-    _format_value_label,
-    _format_matrix_html,
-    _graphviz_array_block,
     _hash_bucket_entries,
-    _is_dict,
-    _is_list_numbers,
-    _is_matrix_value,
-    _looks_like_hash_table,
     _looks_like_graph_mapping,
-    _match_type_pattern_override,
+    _looks_like_hash_table,
     _tree_children,
     _try_networkx_edges_nodes,
-    _digraph_edge,
-    _table_cell_text,
-    dot_escape_label,
 )
-from .models import Anchor, AnchorKind, EdgeKind, NodeKind, VisualEdge, VisualGraph, VisualNode
+from .utils.type_patterns import _match_type_pattern_override
+from .view_types import ViewKind
+from .utils.value_formatting import dot_escape_label, stable_svg_id as _stable_svg_id, table_cell_text as _table_cell_text
+from .view_utils import (
+    NestedRenderer,
+    _digraph_edge,
+    _format_matrix_html,
+    _format_nested_value,
+    _format_value_label,
+    _is_list_numbers,
+    _is_matrix_value,
+)
+
+ARRAY_RENDERER_VERSION = "cell-node-v1"
 
 _AUTO_VIEW_TYPE_MAP: dict[str, ViewKind] = {
     # matrix-like
@@ -152,35 +160,82 @@ def render_graphviz_array_cells(
     limit = min(n, max_items)
 
     dot = Digraph("array")
-    dot.attr("graph", labelloc="t", label=dot_escape_label(title))
-    dot.attr("node", shape="plain")
+    dot.attr("graph", labelloc="t", label=dot_escape_label(f"{title} [cell-node-v1]"), ranksep="0.18", nodesep="0.02")
+    dot.attr("node", shape="plain", margin="0", fontname="Helvetica")
+    dot.attr("edge", style="invis")
     depth_budget = max(0, nested_depth)
-    if n == 0:
-        table_html = '<table border="1" cellborder="1" cellspacing="0"><tr><td>∅</td></tr></table>'
-    else:
-        value_cells = []
-        index_cells = []
-        for i in range(limit):
-            cell_depth = depth_budget - 1 if depth_budget > 0 else 0
-            if cell_depth == 0 and _is_matrix_value(arr[i]):
-                cell_depth = 1
-            cell_html = _format_nested_value(
-                arr[i],
-                cell_depth,
-                max_items,
-                nested_renderer,
-                f"{title}[{i}]",
-            )
-            value_cells.append(f'<td align="center" bgcolor="#ffffff" cellpadding="4">{cell_html}</td>')
-            index_cells.append(
-                f'<td width="48" align="center"><font color="#dc2626" point-size="12">{i}</font></td>'
-            )
-        if n > max_items:
-            value_cells.append('<td width="48" height="36" align="center">…</td>')
-            index_cells.append('<td width="48"></td>')
-        table_html = _graphviz_array_block(value_cells, index_cells)
 
-    dot.node("array", label=f"<{table_html}>")
+    if n == 0:
+        empty_label = (
+            f'<table border="1" cellborder="1" cellspacing="0">'
+            f'<tr><td id="{_stable_svg_id(title, "value", "empty")}" cellpadding="6">∅</td></tr>'
+            '</table>'
+        )
+        dot.node(
+            "array_empty",
+            label=f"<{empty_label}>",
+            id=_stable_svg_id(title, "node", "empty"),
+        )
+        return dot.source
+
+    value_node_ids: list[str] = []
+    index_node_ids: list[str] = []
+    for i in range(limit):
+        cell_depth = depth_budget - 1 if depth_budget > 0 else 0
+        if cell_depth == 0 and _is_matrix_value(arr[i]):
+            cell_depth = 1
+        slot_name = f"{title}[{i}]"
+        cell_html = _format_nested_value(
+            arr[i],
+            cell_depth,
+            max_items,
+            nested_renderer,
+            slot_name,
+        )
+        value_node_id = f"value_{i}"
+        index_node_id = f"index_{i}"
+        value_node_ids.append(value_node_id)
+        index_node_ids.append(index_node_id)
+
+        value_label = (
+            f'<table border="1" cellborder="1" cellspacing="0">'
+            f'<tr><td id="{_stable_svg_id(title, "value", i)}" align="center" bgcolor="#eef6ff" color="#2563eb" cellpadding="4">CELL {i}: {cell_html}</td></tr>'
+            '</table>'
+        )
+        index_label = (
+            '<table border="0" cellborder="0" cellspacing="0">'
+            f'<tr><td id="{_stable_svg_id(title, "index", i)}" width="48" align="center"><font color="#dc2626" point-size="12">{i}</font></td></tr>'
+            '</table>'
+        )
+        dot.node(value_node_id, label=f"<{value_label}>", id=_stable_svg_id(title, "node", "value", i))
+        dot.node(index_node_id, label=f"<{index_label}>", id=_stable_svg_id(title, "node", "index", i))
+
+    if n > max_items:
+        value_node_ids.append("value_ellipsis")
+        index_node_ids.append("index_ellipsis")
+        ellipsis_label = (
+            f'<table border="1" cellborder="1" cellspacing="0">'
+            f'<tr><td id="{_stable_svg_id(title, "value", "ellipsis")}" width="48" height="36" align="center">…</td></tr>'
+            '</table>'
+        )
+        index_ellipsis_label = (
+            '<table border="0" cellborder="0" cellspacing="0">'
+            f'<tr><td id="{_stable_svg_id(title, "index", "ellipsis")}" width="48"></td></tr>'
+            '</table>'
+        )
+        dot.node("value_ellipsis", label=f"<{ellipsis_label}>", id=_stable_svg_id(title, "node", "value", "ellipsis"))
+        dot.node("index_ellipsis", label=f"<{index_ellipsis_label}>", id=_stable_svg_id(title, "node", "index", "ellipsis"))
+
+    for left, right in zip(value_node_ids, value_node_ids[1:]):
+        dot.edge(left, right)
+    for left, right in zip(index_node_ids, index_node_ids[1:]):
+        dot.edge(left, right)
+
+    if value_node_ids:
+        dot.body.append("{rank=same; " + " ".join(value_node_ids) + " }")
+    if index_node_ids:
+        dot.body.append("{rank=same; " + " ".join(index_node_ids) + " }")
+
     return dot.source
 
 
@@ -234,7 +289,7 @@ def render_graphviz_bar(arr: list[Any], title: str = "bar", *, max_items: int = 
         dot = Digraph("bar")
         dot.attr("graph", labelloc="t", label=dot_escape_label(title))
         dot.attr("node", shape="plain")
-        dot.node("bars", label="<<table border=\"0\"><tr><td>∅</td></tr></table>>")
+        dot.node("bars", label=f'<<table id="{_stable_svg_id(title, "wrapper")}" border="0"><tr><td id="{_stable_svg_id(title, "value", "empty")}">∅</td></tr></table>>')
         return dot.source
 
     max_abs = max(abs(n) for n in nums)
@@ -258,7 +313,7 @@ def render_graphviz_bar(arr: list[Any], title: str = "bar", *, max_items: int = 
             f"<tr><td align='center'><font point-size='9' color='#dc2626'>{label}</font></td></tr>"
             "</table>"
         )
-        return f"<td valign='bottom'>{inner}</td>"
+        return f"<td id='{_stable_svg_id(title, 'bar', label)}' valign='bottom'>{inner}</td>"
 
     for lbl, val in zip(labels, nums):
         norm = abs(val) / max_abs if max_abs != 0 else 0
@@ -299,11 +354,11 @@ def render_graphviz_table(
     dot.attr("node", shape="plain")
     depth_budget = max(0, nested_depth)
     table: list[str] = []
-    table.append('<table border="1" cellborder="1" cellspacing="0">')
-    table.append('<tr><td bgcolor="#e5e7eb"><b>Key</b></td><td bgcolor="#e5e7eb"><b>Value</b></td></tr>')
+    table.append(f'<table id="{_stable_svg_id(title, "wrapper")}" border="1" cellborder="1" cellspacing="0">')
+    table.append(f'<tr><td id="{_stable_svg_id(title, "header", "key")}" bgcolor="#e5e7eb"><b>Key</b></td><td id="{_stable_svg_id(title, "header", "value")}" bgcolor="#e5e7eb"><b>Value</b></td></tr>')
 
     if n == 0:
-        table.append('<tr><td colspan="2">∅</td></tr>')
+        table.append(f'<tr><td id="{_stable_svg_id(title, "row", "empty")}" colspan="2">∅</td></tr>')
     else:
         inner_depth = depth_budget - 1 if depth_budget > 0 else 0
         for i in range(limit):
@@ -315,9 +370,9 @@ def render_graphviz_table(
                 nested_renderer,
                 f"{title}.{k}",
             )
-            table.append(f'<tr><td>{_table_cell_text(k)}</td><td>{val_html}</td></tr>')
+            table.append(f'<tr><td id="{_stable_svg_id(title, "row", i, "key")}">{_table_cell_text(k)}</td><td id="{_stable_svg_id(title, "row", i, "value")}">{val_html}</td></tr>')
         if n > max_items:
-            table.append('<tr><td colspan="2">… (+more)</td></tr>')
+            table.append(f'<tr><td id="{_stable_svg_id(title, "row", "ellipsis")}" colspan="2">… (+more)</td></tr>')
 
     table.append("</table>")
     table_html = "".join(table)
@@ -335,18 +390,9 @@ def build_tree(
 ) -> tuple[str, VisualGraph]:
     g = VisualGraph()
 
-    counter = 0
-    id_map: dict[int, str] = {}
-
-    def nid(x: Any) -> str:
-        nonlocal counter
-        ox = id(x)
-        if ox not in id_map:
-            counter += 1
-            id_map[ox] = f"t{counter}"
-        return id_map[ox]
-
     info_cache: dict[int, tuple[Any, list[Any]] | None] = {}
+    id_map: dict[int, str] = {}
+    signature_counts: dict[str, int] = {}
 
     def tree_info(node: Any) -> tuple[Any, list[Any]] | None:
         key = id(node)
@@ -354,13 +400,31 @@ def build_tree(
             info_cache[key] = _tree_children(node)
         return info_cache[key]
 
+    def node_signature(node: Any) -> str:
+        info = tree_info(node)
+        raw_label = info[0] if info is not None else node
+        payload = f"{type(node).__name__}|{raw_label!r}"
+        return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:10]
+
+    def nid(node: Any) -> str:
+        object_id = id(node)
+        existing = id_map.get(object_id)
+        if existing is not None:
+            return existing
+
+        signature = node_signature(node)
+        signature_counts[signature] = signature_counts.get(signature, 0) + 1
+        node_id = f"t_{signature}_{signature_counts[signature]}"
+        id_map[object_id] = node_id
+        return node_id
+
     def ensure_node(node: Any) -> str:
         node_id = nid(node)
         if node_id not in g.nodes:
             info = tree_info(node)
             raw_label = info[0] if info is not None else node
             label_text, is_html = _format_value_label(raw_label, nested_depth, max_items)
-            meta: dict[str, Any] = {"kind": "tree_node"}
+            meta: dict[str, Any] = {"kind": "tree_node", "node_attrs": {"shape": "circle"}}
             if is_html:
                 meta["html_label"] = True
                 meta["node_attrs"] = {"shape": "plain"}
@@ -375,10 +439,10 @@ def build_tree(
 
     while stack and made < max_nodes:
         cur = stack.pop()
-        oc = id(cur)
-        if oc in seen:
+        object_id = id(cur)
+        if object_id in seen:
             continue
-        seen.add(oc)
+        seen.add(object_id)
         made += 1
 
         info = tree_info(cur)
@@ -387,10 +451,10 @@ def build_tree(
         _, kids = info
 
         src = ensure_node(cur)
-        for ch in kids:
-            cid = ensure_node(ch)
-            g.add_edge(VisualEdge(src, cid, type=EdgeKind.CONTAINS, label=None))
-            stack.append(ch)
+        for child in kids:
+            child_id = ensure_node(child)
+            g.add_edge(VisualEdge(src, child_id, type=EdgeKind.CONTAINS, label=None))
+            stack.append(child)
 
     if stack:
         eid = "CUT"
@@ -484,9 +548,9 @@ def render_graphviz_hash_table(
         bucket_nodes.append(bid)
         bucket_label = (
             '<<table border="0" cellborder="0" cellspacing="0">'
-            '<tr><td port="hook" width="46" height="38" border="1" color="#1f2933">'
+            f'<tr><td id="{_stable_svg_id(title, "bucket", idx, "hook")}" port="hook" width="46" height="38" border="1" color="#1f2933">'
             '<font point-size="16"><b>H</b></font></td></tr>'
-            f'<tr><td><font color="#dc2626" point-size="12">{idx}</font></td></tr>'
+            f'<tr><td id="{_stable_svg_id(title, "bucket", idx, "index")}"><font color="#dc2626" point-size="12">{idx}</font></td></tr>'
             "</table>>"
         )
         dot.node(bid, label=bucket_label, shape="plaintext")

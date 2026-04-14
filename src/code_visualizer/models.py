@@ -87,6 +87,7 @@ class Frame:
     step: int
     value: Any
     note: str = ""
+    meta: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

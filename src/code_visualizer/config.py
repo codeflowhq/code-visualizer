@@ -14,7 +14,7 @@ def _default_recursion_depth_map() -> dict[str | type[Any], int]:
 
 
 def _default_allowed_formats() -> set[str]:
-    return {"svg", "png", "jpg"}
+    return {"dot", "svg", "png", "jpg"}
 
 
 @dataclass(slots=True)
@@ -30,11 +30,13 @@ class VisualizerConfig:
     max_depth: int = 3
     max_items_per_view: int = 50
     output_format: str = "png"
+    show_titles: bool = True
     allowed_output_formats: set[str] = field(default_factory=_default_allowed_formats)
     converter_pipeline: ConverterPipeline = field(default_factory=default_converter_pipeline)
     graph_direction: Literal["LR", "TB"] = "LR"
     trace_step_limit_default: int | None = None
     trace_step_limit_map: dict[str, int] = field(default_factory=dict)
+    focus_path_map: dict[str, str] = field(default_factory=dict)
 
     def ensure_output_format(self, fmt: str | None) -> str:
         """Clamp requested output formats to the allowed list."""
@@ -72,15 +74,18 @@ class VisualizerConfig:
             allowed_output_formats=set(self.allowed_output_formats),
             converter_pipeline=ConverterPipeline(self.converter_pipeline.converters),
             trace_step_limit_map=dict(self.trace_step_limit_map),
+            focus_path_map=dict(self.focus_path_map),
         )
 
     def step_limit_for(self, trace_name: str, override: int | None = None) -> int | None:
         """Determine how many steps to render for a given trace name."""
 
-        if override is not None:
+        if trace_name in self.trace_step_limit_map:
+            limit = self.trace_step_limit_map[trace_name]
+        elif override is not None:
             limit = override
         else:
-            limit = self.trace_step_limit_map.get(trace_name, self.trace_step_limit_default)
+            limit = self.trace_step_limit_default
         if limit is None:
             return None
         return max(0, limit)

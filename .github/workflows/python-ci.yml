@@ -1,0 +1,26 @@
+name: Python CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+      - name: Sync dependencies
+        run: uv sync --group dev
+      - name: Ruff
+        run: uv run ruff check src/code_visualizer/builders src/code_visualizer/views src/code_visualizer/tracing src/code_visualizer/graph_builder.py src/code_visualizer/graph_view_builder.py src/code_visualizer/browser_api.py src/code_visualizer/view_utils.py tests
+      - name: Mypy
+        run: uv run mypy src/code_visualizer/builders src/code_visualizer/views src/code_visualizer/tracing src/code_visualizer/graph_builder.py src/code_visualizer/graph_view_builder.py src/code_visualizer/browser_api.py
+      - name: Pytest
+        run: uv run pytest tests -q
+      - name: Build wheel
+        run: uv build --wheel

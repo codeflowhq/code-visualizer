@@ -1,18 +1,14 @@
-"""Compatibility layer for tracing helpers.
-
-This module preserves the existing public import path while the implementation
-lives under ``code_visualizer.tracing``.
-"""
-
-from .tracing import (
+from .common import (
     RenderedTraceFrame,
-    StepTracerUnavailableError,
     VariableTraceEvent,
     WatchFilter,
     WatchTarget,
     _access_path_matches,
     _normalize_access_path,
     _normalize_watch_filters,
+)
+from .pipeline import (
+    StepTracerUnavailableError,
     build_traces,
     trace_algorithm,
     visualize_algorithm,
