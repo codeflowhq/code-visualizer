@@ -28,6 +28,7 @@ class VariableTraceEvent:
     var_id: int
     access_path: str
     order: int
+    access_paths: tuple[str, ...] = ()
 
     def note(self) -> str:
         return f"line {self.line_number} · exec#{self.execution_id} · scope#{self.scope_id}"
