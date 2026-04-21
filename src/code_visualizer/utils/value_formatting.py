@@ -58,14 +58,14 @@ def estimate_visual_width(value: Any, max_items: int = 6, *, max_width: int = 92
 
     if isinstance(value, dict):
         key_width, value_width = estimate_table_column_widths(list(value.items())[:max_items], max_items)
-        return min(max_width, key_width + value_width + 24)
+        return min(max_width, key_width + value_width + 56)
 
     if isinstance(value, (list, tuple)):
         visible = list(value)[:max_items]
         if not visible:
             return 64
         width = sum(estimate_visual_width(item, max_items, max_width=max_width) for item in visible)
-        width += max(0, len(visible) - 1) * 12
+        width += max(0, len(visible) - 1) * 18 + 24
         if len(value) > len(visible):
             width += 42
         return min(max_width, max(64, width))
@@ -75,7 +75,7 @@ def estimate_visual_width(value: Any, max_items: int = 6, *, max_width: int = 92
         if not visible:
             return 64
         width = sum(estimate_visual_width(item, max_items, max_width=max_width) for item in visible)
-        width += max(0, len(visible) - 1) * 12
+        width += max(0, len(visible) - 1) * 18 + 24
         if len(value) > len(visible):
             width += 42
         return min(max_width, max(64, width))
@@ -90,4 +90,4 @@ def estimate_table_column_widths(items: list[tuple[Any, Any]], max_items: int = 
         key_text = str(key)
         key_width = max(key_width, min(220, 20 + len(key_text) * 9))
         value_width = max(value_width, estimate_visual_width(val, max_items))
-    return key_width, value_width
+    return key_width, min(920, value_width + 48)

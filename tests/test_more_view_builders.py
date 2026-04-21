@@ -90,6 +90,16 @@ def test_remote_image_url_without_extension_uses_content_type(monkeypatch) -> No
     assert src.endswith(".jpg")
 
 
+def test_strict_remote_image_url_falls_back_to_original_url(monkeypatch) -> None:
+    from code_visualizer.utils import image_sources
+
+    monkeypatch.setattr(image_sources, "urlopen", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("blocked")))
+
+    url = "https://example.com/photo?w=1024&h=1024"
+
+    assert image_sources._detect_image_source(url, strict=True) == url
+
+
 def test_nested_table_header_uses_widest_value_width() -> None:
     import re
 

@@ -6,8 +6,8 @@ import tempfile
 from html import escape as html_escape
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote_to_bytes
-from urllib.request import urlopen
+from urllib.parse import unquote_to_bytes, urlparse
+from urllib.request import Request, urlopen
 from uuid import uuid4
 
 from graphviz import Source  # type: ignore[import-untyped]
@@ -60,6 +60,20 @@ def _looks_like_image_candidate(value: Any) -> bool:
     return False
 
 
+def _is_pyodide_runtime() -> bool:
+    try:
+        import sys
+
+        return sys.platform == "emscripten"
+    except Exception:
+        return False
+
+
+def _remote_url_suffix(url: str) -> str:
+    path_suffix = Path(urlparse(url).path).suffix.lower()
+    return path_suffix if path_suffix in _IMAGE_EXTENSIONS else ""
+
+
 def _assert_ascii_path(path: Path) -> None:
     path_str = str(path)
     if any(ord(ch) > 127 for ch in path_str):
@@ -89,17 +103,18 @@ def _materialize_data_uri(data_uri: str) -> str | None:
     return _write_cached_image(data, suffix)
 
 
-def _download_remote_image(url: str) -> str | None:
+def _download_remote_image(url: str) -> tuple[str | None, str | None]:
     try:
-        with urlopen(url, timeout=5) as resp:  # noqa: S310
+        request = Request(url, headers={"User-Agent": "CodeFlow/0.1 image visualizer"})  # noqa: S310
+        with urlopen(request, timeout=5) as resp:  # noqa: S310
             data = resp.read()
             content_type = resp.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
-    except Exception:
-        return None
-    suffix = Path(url).suffix.lower()
+    except Exception as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+    suffix = _remote_url_suffix(url)
     if suffix not in _IMAGE_EXTENSIONS:
         suffix = _MIME_TO_SUFFIX.get(content_type, ".png")
-    return _write_cached_image(data, suffix)
+    return _write_cached_image(data, suffix), None
 
 
 def _materialize_matplotlib_image(value: Any) -> str | None:
@@ -171,8 +186,16 @@ def _detect_image_source(value: Any, *, strict: bool = False) -> str | None:  # 
             cached = _materialize_data_uri(candidate)
             return cached if cached is not None else _fail("Invalid data URI for image")
         if lower.startswith(("http://", "https://")):
-            cached = _download_remote_image(candidate)
-            return cached if cached is not None else _fail("Failed to download remote image")
+            if _is_pyodide_runtime():
+                return candidate
+            cached, error = _download_remote_image(candidate)
+            if cached is not None:
+                return cached
+            if strict:
+                # Keep external URLs usable in browser/SVG renderers when servers block
+                # Python-side downloads or require hotlink-style image loading.
+                return candidate
+            return _fail(f"Failed to download remote image: {error or 'unknown error'}")
         if not _is_image_path(candidate):
             return _fail("String does not look like an image path")
         path = Path(candidate)
