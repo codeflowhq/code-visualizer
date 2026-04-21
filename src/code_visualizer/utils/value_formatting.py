@@ -83,6 +83,31 @@ def estimate_visual_width(value: Any, max_items: int = 6, *, max_width: int = 92
     return max(72, min(max_width, 24 + len(type(value).__name__) * 9))
 
 
+def estimate_visual_height(value: Any, max_items: int = 6, *, max_height: int = 420) -> int:
+    """Estimate Graphviz HTML label height for equal-sized sibling cells."""
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return 30
+
+    if isinstance(value, dict):
+        visible = list(value.items())[:max_items]
+        row_count = max(1, len(visible))
+        nested_extra = max(
+            (estimate_visual_height(item, max_items, max_height=max_height) - 30 for _, item in visible),
+            default=0,
+        )
+        return min(max_height, 34 + row_count * 28 + nested_extra)
+
+    if isinstance(value, (list, tuple, set, frozenset)):
+        visible = list(value)[:max_items] if not isinstance(value, (set, frozenset)) else sorted(value, key=lambda item: str(item))[:max_items]
+        if not visible:
+            return 34
+        child_height = max(estimate_visual_height(item, max_items, max_height=max_height) for item in visible)
+        # Include the nested array index row and table borders.
+        return min(max_height, child_height + 34)
+
+    return 34
+
+
 def estimate_table_column_widths(items: list[tuple[Any, Any]], max_items: int = 6) -> tuple[int, int]:
     key_width = 92
     value_width = 92

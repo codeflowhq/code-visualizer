@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..models import EdgeKind, NodeKind, VisualEdge, VisualNode
+from ..utils.value_formatting import estimate_visual_height, estimate_visual_width
 from ..view_utils import (
     _format_container_stub,
     _format_nested_value,
@@ -56,10 +57,15 @@ def build_array_view_node_cells(runtime: dict[str, Any], value: Any, name: str, 
     runtime["resolver"] = experimental_array_nested_resolver(runtime, original_resolver)
     try:
         limit = min(len(array), item_limit)
-        has_nested_sequence = any(
-            isinstance(item, (list, tuple, set, frozenset)) for item in array[:limit]
+        visible_items = array[:limit]
+        value_cell_height = max(
+            30,
+            min(420, max((estimate_visual_height(item, item_limit) for item in visible_items), default=30)),
         )
-        value_cell_height = 58 if has_nested_sequence else 30
+        value_cell_width = max(
+            54,
+            min(920, max((estimate_visual_width(item, item_limit) for item in visible_items), default=54)),
+        )
         occurrence_counts: dict[str, int] = {}
         prev_id: str | None = None
         for idx in range(limit):
@@ -84,7 +90,7 @@ def build_array_view_node_cells(runtime: dict[str, Any], value: Any, name: str, 
                     )
             node_label = (
                 "<table border='1' cellborder='1' cellspacing='0' cellpadding='0'>"
-                f"<tr><td port='{node_id}_value' height='{value_cell_height}' fixedsize='true' align='center' bgcolor='#ffffff' cellpadding='2'>{content_html}</td></tr>"
+                f"<tr><td port='{node_id}_value' width='{value_cell_width}' height='{value_cell_height}' fixedsize='true' align='center' bgcolor='#ffffff' cellpadding='2'>{content_html}</td></tr>"
                 f"<tr><td align='center' bgcolor='#ffffff' cellpadding='1'><font color='#94a3b8' point-size='10'>{idx}</font></td></tr>"
                 "</table>"
             )

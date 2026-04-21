@@ -21,6 +21,16 @@ def test_array_node_builder_renders_nested_list_inline() -> None:
     assert "arr_cell_data_2__" not in nested_label
 
 
+def test_array_node_builder_uses_equal_outer_cell_size_for_nested_list() -> None:
+    _, graph = build_graph_view([7, 3, [0, 1, 2]], "data", ViewKind.ARRAY_CELLS_NODE, 2, item_limit=10)
+
+    scalar_label = graph.nodes["arr_item_data_7_0"].label
+    nested_label = graph.nodes["arr_cell_data_2"].label
+
+    assert "width='222' height='64' fixedsize='true'" in scalar_label
+    assert "width='222' height='64' fixedsize='true'" in nested_label
+
+
 def test_table_node_builder_creates_header_and_row_nodes() -> None:
     value = {"score": 92, "meta": {"level": 2}}
     root_id, graph = build_graph_view(value, "data", ViewKind.TABLE_NODE, 2, item_limit=10)
