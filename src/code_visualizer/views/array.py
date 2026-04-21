@@ -6,6 +6,7 @@ from typing import Any
 from ..models import EdgeKind, NodeKind, VisualEdge, VisualNode
 from ..view_utils import (
     _format_container_stub,
+    _format_nested_value,
     _format_scalar_html,
     _is_scalar_value,
     _stable_svg_id,
@@ -70,10 +71,13 @@ def build_array_view_node_cells(runtime: dict[str, Any], value: Any, name: str, 
             else:
                 node_id = safe_dot_token("arr_cell", logical_name or "array", idx)
                 svg_id = _stable_svg_id(logical_name or "array", "array", "cell", idx)
-                nested_renderer = make_nested_renderer(runtime, node_id, f"{node_id}_value", slot_name)
-                content_html = flatten_nested_preview_frame(
-                    nested_renderer(item, slot_name, cell_depth) or _format_container_stub(item)
-                )
+                if isinstance(item, (list, tuple, set, frozenset)):
+                    content_html = _format_nested_value(item, cell_depth, item_limit, None, slot_name)
+                else:
+                    nested_renderer = make_nested_renderer(runtime, node_id, f"{node_id}_value", slot_name)
+                    content_html = flatten_nested_preview_frame(
+                        nested_renderer(item, slot_name, cell_depth) or _format_container_stub(item)
+                    )
             node_label = (
                 "<table border='1' cellborder='1' cellspacing='0' cellpadding='0'>"
                 f"<tr><td port='{node_id}_value' align='center' bgcolor='#ffffff' cellpadding='2'>{content_html}</td></tr>"

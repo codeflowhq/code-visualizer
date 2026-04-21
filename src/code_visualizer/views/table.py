@@ -74,11 +74,11 @@ def build_table_view_node_rows(runtime: dict[str, Any], value: Any, name: str, d
     header_id = safe_dot_token("table_header", logical_name)
     header_label = (
         "<table border='1' cellborder='1' cellspacing='0' cellpadding='0'>"
-        f"<tr><td width='{total_width}' cellpadding='0'>"
+        f"<tr><td width='{total_width}' fixedsize='true' cellpadding='0'>"
         "<table border='0' cellborder='1' cellspacing='0' cellpadding='0'>"
         "<tr>"
-        f"<td width='{key_width}' bgcolor='#e5e7eb' cellpadding='6'><font color='#0f172a'><b>Key</b></font></td>"
-        f"<td width='{value_width}' bgcolor='#e5e7eb' cellpadding='6'><font color='#0f172a'><b>Value</b></font></td>"
+        f"<td width='{key_width}' fixedsize='true' align='center' bgcolor='#e5e7eb' cellpadding='6'><font color='#0f172a'><b>Key</b></font></td>"
+        f"<td width='{value_width}' fixedsize='true' align='center' bgcolor='#e5e7eb' cellpadding='6'><font color='#0f172a'><b>Value</b></font></td>"
         "</tr></table>"
         "</td></tr></table>"
     )
@@ -111,11 +111,11 @@ def build_table_view_node_rows(runtime: dict[str, Any], value: Any, name: str, d
 
         row_label = (
             "<table border='1' cellborder='1' cellspacing='0' cellpadding='0'>"
-            f"<tr><td width='{total_width}' cellpadding='0'>"
+            f"<tr><td width='{total_width}' fixedsize='true' cellpadding='0'>"
             "<table border='0' cellborder='1' cellspacing='0' cellpadding='0'>"
             "<tr>"
-            f"<td width='{key_width}' align='center' bgcolor='{key_fill}' cellpadding='6'><font color='#0f172a' point-size='11'><b>{key_text}</b></font></td>"
-            f"<td width='{value_width}' port='{value_port}' align='center' bgcolor='{value_fill}' cellpadding='6'>{value_html}</td>"
+            f"<td width='{key_width}' fixedsize='true' align='center' bgcolor='{key_fill}' cellpadding='6'><font color='#0f172a' point-size='11'><b>{key_text}</b></font></td>"
+            f"<td width='{value_width}' fixedsize='true' port='{value_port}' align='center' bgcolor='{value_fill}' cellpadding='6'>{value_html}</td>"
             "</tr></table>"
             "</td></tr></table>"
         )

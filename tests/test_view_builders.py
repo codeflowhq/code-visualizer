@@ -12,6 +12,15 @@ def test_array_node_builder_uses_occurrence_based_item_ids() -> None:
     assert graph.graph_attrs["label"] == "<<font point-size='16' color='#0f172a'><b>data</b></font>>"
 
 
+def test_array_node_builder_renders_nested_list_inline() -> None:
+    _, graph = build_graph_view([7, 3, [0, 1, 2]], "data", ViewKind.ARRAY_CELLS_NODE, 2, item_limit=10)
+
+    nested_label = graph.nodes["arr_cell_data_2"].label
+
+    assert 'id="cv-data-2--value-table"' in nested_label
+    assert "arr_cell_data_2__" not in nested_label
+
+
 def test_table_node_builder_creates_header_and_row_nodes() -> None:
     value = {"score": 92, "meta": {"level": 2}}
     root_id, graph = build_graph_view(value, "data", ViewKind.TABLE_NODE, 2, item_limit=10)
@@ -21,6 +30,7 @@ def test_table_node_builder_creates_header_and_row_nodes() -> None:
     assert "table_row_data_score" in graph.nodes
     assert "table_row_data_meta" in graph.nodes
     assert any(edge.src == "table_header_data" and edge.dst == "table_row_data_score" for edge in graph.edges)
+    assert "fixedsize='true'" in graph.nodes["table_header_data"].label
 
 
 def test_matrix_node_builder_creates_headers_and_cell_nodes() -> None:
