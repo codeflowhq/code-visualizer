@@ -30,7 +30,7 @@ def test_table_node_builder_creates_header_and_row_nodes() -> None:
     assert "table_row_data_score" in graph.nodes
     assert "table_row_data_meta" in graph.nodes
     assert any(edge.src == "table_header_data" and edge.dst == "table_row_data_score" for edge in graph.edges)
-    assert "fixedsize='true'" in graph.nodes["table_header_data"].label
+    assert "FIXEDSIZE='TRUE'" in graph.nodes["table_header_data"].label
 
 
 def test_matrix_node_builder_creates_headers_and_cell_nodes() -> None:

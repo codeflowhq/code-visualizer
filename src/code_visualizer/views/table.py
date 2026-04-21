@@ -70,19 +70,20 @@ def build_table_view_node_rows(runtime: dict[str, Any], value: Any, name: str, d
 
     root_id = new_node_id(runtime, "table_exp")
     graph.add_node(VisualNode(root_id, NodeKind.OBJECT, "", {"kind": "table_root", "node_attrs": {"shape": "point", "style": "invis", "width": "0.01", "height": "0.01"}}))
+    node_width_inches = f"{max(0.01, total_width / 72):.2f}"
 
     header_id = safe_dot_token("table_header", logical_name)
     header_label = (
-        "<table border='1' cellborder='1' cellspacing='0' cellpadding='0'>"
-        f"<tr><td width='{total_width}' fixedsize='true' cellpadding='0'>"
-        "<table border='0' cellborder='1' cellspacing='0' cellpadding='0'>"
+        "<table BORDER='1' CELLBORDER='1' CELLSPACING='0' CELLPADDING='0'>"
+        f"<tr><td WIDTH='{total_width}' FIXEDSIZE='TRUE' CELLPADDING='0'>"
+        "<table BORDER='0' CELLBORDER='1' CELLSPACING='0' CELLPADDING='0'>"
         "<tr>"
-        f"<td width='{key_width}' fixedsize='true' align='center' bgcolor='#e5e7eb' cellpadding='6'><font color='#0f172a'><b>Key</b></font></td>"
-        f"<td width='{value_width}' fixedsize='true' align='center' bgcolor='#e5e7eb' cellpadding='6'><font color='#0f172a'><b>Value</b></font></td>"
+        f"<td WIDTH='{key_width}' FIXEDSIZE='TRUE' ALIGN='CENTER' BGCOLOR='#e5e7eb' CELLPADDING='6'><font color='#0f172a'><b>Key</b></font></td>"
+        f"<td WIDTH='{value_width}' FIXEDSIZE='TRUE' ALIGN='CENTER' BGCOLOR='#e5e7eb' CELLPADDING='6'><font color='#0f172a'><b>Value</b></font></td>"
         "</tr></table>"
         "</td></tr></table>"
     )
-    graph.add_node(VisualNode(header_id, NodeKind.OBJECT, header_label, {"html_label": True, "rank": "table_header", "node_attrs": {"shape": "plain", "color": "#cbd5e1", "penwidth": "1.0"}}))
+    graph.add_node(VisualNode(header_id, NodeKind.OBJECT, header_label, {"html_label": True, "rank": "table_header", "node_attrs": {"shape": "plain", "color": "#cbd5e1", "penwidth": "1.0", "width": node_width_inches}}))
 
     prev_node_id = header_id
     for idx in range(limit):
@@ -110,16 +111,16 @@ def build_table_view_node_rows(runtime: dict[str, Any], value: Any, name: str, d
             key_fill, value_fill, border_color, penwidth = "#f8fafc", "#ffffff", "#cbd5e1", "1.0"
 
         row_label = (
-            "<table border='1' cellborder='1' cellspacing='0' cellpadding='0'>"
-            f"<tr><td width='{total_width}' fixedsize='true' cellpadding='0'>"
-            "<table border='0' cellborder='1' cellspacing='0' cellpadding='0'>"
+            "<table BORDER='1' CELLBORDER='1' CELLSPACING='0' CELLPADDING='0'>"
+            f"<tr><td WIDTH='{total_width}' FIXEDSIZE='TRUE' CELLPADDING='0'>"
+            "<table BORDER='0' CELLBORDER='1' CELLSPACING='0' CELLPADDING='0'>"
             "<tr>"
-            f"<td width='{key_width}' fixedsize='true' align='center' bgcolor='{key_fill}' cellpadding='6'><font color='#0f172a' point-size='11'><b>{key_text}</b></font></td>"
-            f"<td width='{value_width}' fixedsize='true' port='{value_port}' align='center' bgcolor='{value_fill}' cellpadding='6'>{value_html}</td>"
+            f"<td WIDTH='{key_width}' FIXEDSIZE='TRUE' ALIGN='CENTER' BGCOLOR='{key_fill}' CELLPADDING='6'><font color='#0f172a' point-size='11'><b>{key_text}</b></font></td>"
+            f"<td WIDTH='{value_width}' FIXEDSIZE='TRUE' PORT='{value_port}' ALIGN='CENTER' BGCOLOR='{value_fill}' CELLPADDING='6'>{value_html}</td>"
             "</tr></table>"
             "</td></tr></table>"
         )
-        graph.add_node(VisualNode(row_id, NodeKind.OBJECT, row_label, {"kind": "table_row", "html_label": True, "rank": f"table_row_{idx}", "node_attrs": {"shape": "plain", "color": border_color, "penwidth": penwidth, "id": _stable_svg_id(logical_name, "table", "row", key_text)}}))
+        graph.add_node(VisualNode(row_id, NodeKind.OBJECT, row_label, {"kind": "table_row", "html_label": True, "rank": f"table_row_{idx}", "node_attrs": {"shape": "plain", "color": border_color, "penwidth": penwidth, "id": _stable_svg_id(logical_name, "table", "row", key_text), "width": node_width_inches}}))
         graph.add_edge(VisualEdge(prev_node_id, row_id, type=EdgeKind.LAYOUT, meta={"edge_attrs": {"style": "invis"}}))
         prev_node_id = row_id
 

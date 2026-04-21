@@ -116,11 +116,11 @@ def test_nested_table_header_uses_widest_value_width() -> None:
     users = graph.nodes["table_row_data_users"].label
     meta = graph.nodes["table_row_data_meta"].label
 
-    header_widths = re.findall(r"width='(\d+)'", header)
+    header_widths = re.findall(r"WIDTH='(\d+)'", header)
     header_value_width = header_widths[-1] if header_widths else None
     assert header_value_width is not None
-    assert f"width='{header_value_width}' fixedsize='true' port='table_row_data_users_value'" in users
-    assert f"width='{header_value_width}' fixedsize='true' port='table_row_data_meta_value'" in meta
+    assert f"WIDTH='{header_value_width}' FIXEDSIZE='TRUE' PORT='table_row_data_users_value'" in users
+    assert f"WIDTH='{header_value_width}' FIXEDSIZE='TRUE' PORT='table_row_data_meta_value'" in meta
 
 
 def test_tree_view_preserves_node_identity_when_children_swap() -> None:
