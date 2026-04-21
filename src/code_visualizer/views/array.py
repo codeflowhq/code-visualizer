@@ -81,8 +81,9 @@ def build_array_view_node_cells(runtime: dict[str, Any], value: Any, name: str, 
             else:
                 node_id = safe_dot_token("arr_cell", logical_name or "array", idx)
                 svg_id = _stable_svg_id(logical_name or "array", "array", "cell", idx)
-                if isinstance(item, (list, tuple, set, frozenset)):
-                    content_html = _format_nested_value(item, cell_depth, item_limit, None, slot_name)
+                if isinstance(item, (list, tuple, set, frozenset, dict)):
+                    inline_depth = max(1, cell_depth)
+                    content_html = _format_nested_value(item, inline_depth, item_limit, None, slot_name)
                 else:
                     nested_renderer = make_nested_renderer(runtime, node_id, f"{node_id}_value", slot_name)
                     content_html = flatten_nested_preview_frame(

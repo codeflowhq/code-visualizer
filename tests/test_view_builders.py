@@ -31,6 +31,18 @@ def test_array_node_builder_uses_equal_outer_cell_size_for_nested_list() -> None
     assert "width='222' height='64' fixedsize='true'" in nested_label
 
 
+def test_array_node_builder_expands_dict_items_inline() -> None:
+    users = [{"id": 1, "tags": ["a", "b"]}, {"id": 2, "tags": ["c", "d"]}]
+    _, graph = build_graph_view(users, 'data["users"]', ViewKind.ARRAY_CELLS_NODE, 1, item_limit=10)
+
+    first_user_label = graph.nodes["arr_cell_data_users_0"].label
+
+    assert "dict keys=2" not in first_user_label
+    assert "<b>Key</b>" in first_user_label
+    assert "id" in first_user_label
+    assert "tags" in first_user_label
+
+
 def test_table_node_builder_creates_header_and_row_nodes() -> None:
     value = {"score": 92, "meta": {"level": 2}}
     root_id, graph = build_graph_view(value, "data", ViewKind.TABLE_NODE, 2, item_limit=10)
