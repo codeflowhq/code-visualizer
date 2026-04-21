@@ -67,6 +67,56 @@ def test_image_view_builder_creates_html_image_node() -> None:
     assert "IMG SRC=" in graph.nodes[root_id].label
 
 
+def test_remote_image_url_without_extension_uses_content_type(monkeypatch) -> None:
+    from code_visualizer.utils import image_sources
+
+    class Response:
+        headers = {"Content-Type": "image/jpeg"}
+
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b"fake-jpeg"
+
+    monkeypatch.setattr(image_sources, "urlopen", lambda *_args, **_kwargs: Response())
+
+    src = image_sources._detect_image_source("https://example.com/photo?w=1024&h=1024", strict=True)
+
+    assert src is not None
+    assert src.endswith(".jpg")
+
+
+def test_nested_table_header_uses_widest_value_width() -> None:
+    import re
+
+    value = {
+        "users": [
+            {"id": 1, "tags": ["a", "b"]},
+            {"id": 2, "tags": ["c", "d"]},
+        ],
+        "meta": {"page": 1, "total": 2},
+    }
+    _, graph = build_graph_view(value, "data", ViewKind.TABLE_NODE, 3, item_limit=10)
+
+    header = graph.nodes["table_header_data"].label
+    users = graph.nodes["table_row_data_users"].label
+    meta = graph.nodes["table_row_data_meta"].label
+
+    header_widths = re.findall(r"width='(\d+)'", header)
+    header_value_width = header_widths[-1] if header_widths else None
+    users_value_width = re.search(r"width='(\d+)' port='table_row_data_users_value'", users)
+    meta_value_width = re.search(r"width='(\d+)' port='table_row_data_meta_value'", meta)
+
+    assert header_value_width is not None
+    assert users_value_width is not None
+    assert meta_value_width is not None
+    assert header_value_width == users_value_width.group(1) == meta_value_width.group(1)
+
+
 def test_tree_view_preserves_node_identity_when_children_swap() -> None:
     original = {
         "label": "root",

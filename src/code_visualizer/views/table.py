@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from ..models import EdgeKind, NodeKind, VisualEdge, VisualNode
+from ..utils.value_formatting import estimate_table_column_widths
 from ..view_utils import (
     _format_container_stub,
     _format_nested_value,
@@ -30,17 +31,10 @@ def _extract_table_focus_key(focus_path: str | None, logical_name: str) -> str |
     return None
 
 
-def _table_column_widths(items: list[tuple[Any, Any]]) -> tuple[int, int, int]:
-    key_width = 92
-    value_width = 92
-    for key, val in items:
-        key_text = _table_cell_text(key)
-        key_width = max(key_width, min(180, 12 + len(key_text) * 9))
-        if _is_scalar_value(val):
-            value_text = str(val)
-            value_width = max(value_width, min(220, 16 + len(value_text) * 10))
-        else:
-            value_width = max(value_width, 420)
+def _table_column_widths(items: list[tuple[Any, Any]], item_limit: int) -> tuple[int, int, int]:
+    key_width, value_width = estimate_table_column_widths(items, item_limit)
+    key_width = min(220, max(92, key_width))
+    value_width = min(920, max(92, value_width))
     total_width = key_width + value_width
     return key_width, value_width, total_width
 
@@ -60,7 +54,7 @@ def build_table_view_node_rows(runtime: dict[str, Any], value: Any, name: str, d
     focus_path = runtime.get("focus_path")
     focused_key = _extract_table_focus_key(focus_path, logical_name)
     visible_items = items[:limit]
-    key_width, value_width, total_width = _table_column_widths(visible_items)
+    key_width, value_width, total_width = _table_column_widths(visible_items, item_limit)
 
     graph = runtime["graph"]
     graph.graph_attrs.setdefault("rankdir", "TB")

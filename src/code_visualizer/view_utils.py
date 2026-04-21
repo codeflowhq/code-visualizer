@@ -5,7 +5,7 @@ from collections.abc import Callable, Mapping
 from html import escape as html_escape
 from typing import Any
 
-from graphviz import Digraph
+from graphviz import Digraph  # type: ignore[import-untyped]
 
 from .utils.image_sources import (
     VisualizationImageError as _VisualizationImageError,
@@ -43,6 +43,9 @@ from .utils.structure_detection import (
 from .utils.type_patterns import _is_number
 from .utils.type_patterns import (
     _match_type_pattern_override as _match_type_pattern_override_impl,
+)
+from .utils.value_formatting import (
+    estimate_table_column_widths as _estimate_table_column_widths,
 )
 from .utils.value_formatting import (
     format_container_stub as _format_container_stub,
@@ -232,10 +235,16 @@ def _format_inline_collection(  # noqa: C901
         items = list(value.items())
         n = len(items)
         limit = min(n, max_items)
-        rows: list[str] = []
-        rows.append('<tr><td bgcolor="#e5e7eb"><b>Key</b></td><td bgcolor="#e5e7eb"><b>Value</b></td></tr>')
+        key_width, value_width = _estimate_table_column_widths(items[:limit], max_items)
+        dict_rows: list[str] = []
+        dict_rows.append(
+            "<tr>"
+            f'<td width="{key_width}" bgcolor="#e5e7eb" align="center"><b>Key</b></td>'
+            f'<td width="{value_width}" bgcolor="#e5e7eb" align="center"><b>Value</b></td>'
+            "</tr>"
+        )
         if n == 0:
-            rows.append('<tr><td colspan="2">∅</td></tr>')
+            dict_rows.append('<tr><td colspan="2">∅</td></tr>')
         else:
             for idx in range(limit):
                 k, v = items[idx]
@@ -246,10 +255,15 @@ def _format_inline_collection(  # noqa: C901
                     nested_renderer,
                     f"{slot_name}.{_table_cell_text(k)}",
                 )
-                rows.append(f"<tr><td>{_table_cell_text(k)}</td><td>{val_html}</td></tr>")
+                dict_rows.append(
+                    "<tr>"
+                    f'<td width="{key_width}" align="center">{_table_cell_text(k)}</td>'
+                    f'<td width="{value_width}" align="center">{val_html}</td>'
+                    "</tr>"
+                )
             if n > max_items:
-                rows.append('<tr><td colspan="2">… (+more)</td></tr>')
-        return f'<table border="1" cellborder="1" cellspacing="0">{"".join(rows)}</table>'
+                dict_rows.append('<tr><td colspan="2">… (+more)</td></tr>')
+        return f'<table border="1" cellborder="1" cellspacing="0">{"".join(dict_rows)}</table>'
 
     return None
 
@@ -386,4 +400,3 @@ def _match_named_override(name: str, mapping: Mapping[str, ViewKind] | None) -> 
         if _normalize_view_name(raw_key) == normalized:
             return view
     return None
-

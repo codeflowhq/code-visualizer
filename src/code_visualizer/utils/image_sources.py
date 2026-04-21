@@ -5,10 +5,10 @@ import io
 import tempfile
 from html import escape as html_escape
 from pathlib import Path
+from typing import Any
 from urllib.parse import unquote_to_bytes
 from urllib.request import urlopen
 from uuid import uuid4
-from typing import Any
 
 from graphviz import Source  # type: ignore[import-untyped]
 
@@ -21,9 +21,10 @@ _DATA_URI_SUFFIX = {
     "image/svg+xml": ".svg",
     "image/webp": ".webp",
 }
+_MIME_TO_SUFFIX = _DATA_URI_SUFFIX
 _ASCII_TMP_ROOT = Path(tempfile.gettempdir())
 if any(ord(ch) > 127 for ch in str(_ASCII_TMP_ROOT)):
-    _ASCII_TMP_ROOT = Path("/tmp")
+    _ASCII_TMP_ROOT = Path("/tmp")  # noqa: S108
 _IMAGE_CACHE_DIR = (_ASCII_TMP_ROOT / "code_visualizer_images").resolve()
 _IMAGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -90,7 +91,7 @@ def _materialize_data_uri(data_uri: str) -> str | None:
 
 def _download_remote_image(url: str) -> str | None:
     try:
-        with urlopen(url, timeout=5) as resp:
+        with urlopen(url, timeout=5) as resp:  # noqa: S310
             data = resp.read()
             content_type = resp.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
     except Exception:
@@ -155,7 +156,7 @@ def _materialize_pil_image(value: Any) -> str | None:
     return _write_cached_image(data, suffix)
 
 
-def _detect_image_source(value: Any, *, strict: bool = False) -> str | None:
+def _detect_image_source(value: Any, *, strict: bool = False) -> str | None:  # noqa: C901
     def _fail(detail: str) -> str | None:
         if strict:
             raise VisualizationImageError(detail)
