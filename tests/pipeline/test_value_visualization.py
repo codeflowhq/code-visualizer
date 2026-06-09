@@ -35,3 +35,13 @@ def test_visualize_returns_graphviz_artifact_for_structured_values() -> None:
     assert artifact.kind is ArtifactKind.GRAPHVIZ
     assert "digraph" in artifact.content
     assert artifact.title == "data: table"
+
+
+def test_visualize_uses_view_color_map_for_supported_views() -> None:
+    config = default_visualizer_config()
+    config.view_name_map["data"] = ViewKind.BAR
+    config.view_color_map["data"] = "#9333ea"
+
+    artifact = visualize([7, 3, 1], name="data", config=config)
+
+    assert "#9333ea" in artifact.content

@@ -26,6 +26,7 @@ def _runtime(show_titles: bool = True) -> ViewBuildContext:
         coerce=lambda value: value,
         resolver=None,
         focus_path=None,
+        accent_color=None,
         counter=count(1),
         show_titles=show_titles,
     )
