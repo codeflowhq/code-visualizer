@@ -267,15 +267,15 @@ def _merge_duplicate_root_events(
 def _compact_event_orders(
     events: Sequence[VariableTraceEvent],
 ) -> list[VariableTraceEvent]:
-    order_by_execution: dict[tuple[int, int], int] = {}
     next_order = 1
     compacted: list[VariableTraceEvent] = []
+    previous_line_number: int | None = None
+    previous_order: int | None = None
     for event in events:
-        key = (event.execution_id, event.line_number)
-        order = order_by_execution.get(key)
-        if order is None:
+        if event.line_number == previous_line_number and previous_order is not None:
+            order = previous_order
+        else:
             order = next_order
-            order_by_execution[key] = order
             next_order += 1
         compacted.append(
             VariableTraceEvent(
@@ -290,6 +290,8 @@ def _compact_event_orders(
                 access_paths=event.access_paths,
             )
         )
+        previous_line_number = event.line_number
+        previous_order = order
     return compacted
 
 

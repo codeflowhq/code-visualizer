@@ -43,3 +43,25 @@ def test_visualize_uses_ir_extractor_for_non_scalar_unstructured_values() -> Non
     assert artifact.kind is ArtifactKind.GRAPHVIZ
     assert artifact.title == "obj: node_link"
     assert "obj" in artifact.content
+
+
+def test_visualize_normalizes_blank_slot_names_to_default() -> None:
+    artifact = visualize(123, name="   ", config=VisualizerConfig(show_titles=True))
+
+    assert artifact.kind is ArtifactKind.GRAPHVIZ
+    assert artifact.title == "x: value"
+    assert "123" in artifact.content
+
+
+def test_visualize_applies_normalized_legacy_string_view_overrides_at_api_boundary() -> None:
+    artifact = visualize(
+        {"score": 92},
+        name="data",
+        config=VisualizerConfig(
+            view_name_map={"data": "table"},  # type: ignore[dict-item]
+            show_titles=True,
+        ),
+    )
+
+    assert artifact.kind is ArtifactKind.GRAPHVIZ
+    assert artifact.title == "data: table"

@@ -136,6 +136,30 @@ def test_compact_event_orders_reuses_order_for_same_execution_and_line() -> None
     assert [item.order for item in compacted] == [1, 1, 2]
 
 
+def test_compact_event_orders_reuses_order_for_contiguous_same_line_events() -> None:
+    events = [
+        _event(order=10, line_number=2, execution_id=1),
+        _event(order=11, line_number=2, execution_id=2, variable="other", var_id=2),
+        _event(order=12, line_number=3, execution_id=3, variable="third", var_id=3),
+    ]
+
+    compacted = _compact_event_orders(events)
+
+    assert [item.order for item in compacted] == [1, 1, 2]
+
+
+def test_compact_event_orders_keeps_non_contiguous_same_line_events_distinct() -> None:
+    events = [
+        _event(order=10, line_number=2, execution_id=1),
+        _event(order=11, line_number=3, execution_id=2, variable="other", var_id=2),
+        _event(order=12, line_number=2, execution_id=3, variable="third", var_id=3),
+    ]
+
+    compacted = _compact_event_orders(events)
+
+    assert [item.order for item in compacted] == [1, 2, 3]
+
+
 def test_augment_pop_mutation_events_inserts_synthetic_receiver_snapshot() -> None:
     events = [
         _event(

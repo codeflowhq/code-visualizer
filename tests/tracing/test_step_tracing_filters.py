@@ -25,9 +25,50 @@ def testtrace_access_path_matches_descendants() -> None:
 def testnormalize_trace_watch_filters_keeps_trace_name_for_expressions() -> None:
     filters = normalize_trace_watch_filters(["data", 'data["meta"]'])
     assert filters[0].trace_name == 'data["meta"]'
-    assert filters[0].access_path == 'data["meta"]'
+    assert filters[0].access_path == "data['meta']"
     assert filters[0].name == "data"
     assert filters[1].name == "data"
+
+
+def test_normalize_trace_watch_filters_trims_and_derives_mapping_root() -> None:
+    filters = normalize_trace_watch_filters(
+        [{"access_path": '  data["meta"]  ', "scope_id": 3, "line_number": 8}]
+    )
+
+    assert filters == [
+        WatchFilter(
+            name="data",
+            access_path="data['meta']",
+            trace_name="data['meta']",
+            scope_id=3,
+            line_number=8,
+        )
+    ]
+
+
+def test_normalize_trace_watch_filters_rejects_empty_strings_and_empty_mappings() -> None:
+    try:
+        normalize_trace_watch_filters(["   "])
+    except ValueError as exc:
+        assert "must not be empty strings" in str(exc)
+    else:  # pragma: no cover - defensive assertion
+        raise AssertionError("Expected empty watch strings to be rejected")
+
+    try:
+        normalize_trace_watch_filters([{}])
+    except ValueError as exc:
+        assert "include at least one selector" in str(exc)
+    else:  # pragma: no cover - defensive assertion
+        raise AssertionError("Expected empty watch mappings to be rejected")
+
+
+def test_normalize_trace_watch_filters_rejects_invalid_scope_types() -> None:
+    try:
+        normalize_trace_watch_filters([{"name": "data", "scope_id": "one"}])
+    except TypeError as exc:
+        assert "scope_id must be an integer" in str(exc)
+    else:  # pragma: no cover - defensive assertion
+        raise AssertionError("Expected invalid scope_id types to be rejected")
 
 
 def test_expression_watch_preserves_nested_focus_path() -> None:

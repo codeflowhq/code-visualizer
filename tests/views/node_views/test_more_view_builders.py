@@ -160,6 +160,28 @@ def test_nested_table_header_uses_widest_value_width() -> None:
     assert "table_row_data_meta_value" in meta
 
 
+def test_table_view_inlines_nested_dict_html_inside_the_value_cell() -> None:
+    value = {
+        "name": "Alice",
+        "meta": {"level": 1, "track": "math"},
+    }
+    _, graph = build_graph_view(value, "data", ViewKind.TABLE, 3, item_limit=10)
+
+    meta_row = graph.nodes["table_row_data_meta"].label
+
+    assert "<b>Key</b>" in meta_row
+    assert "<b>Value</b>" in meta_row
+    assert ">level<" in meta_row
+    assert ">track<" in meta_row
+    assert "#f3f4f6" in meta_row
+    assert set(graph.nodes) == {
+        "table_exp_1",
+        "table_header_data",
+        "table_row_data_name",
+        "table_row_data_meta",
+    }
+
+
 def test_tree_view_preserves_node_identity_when_children_swap() -> None:
     original = {
         "label": "root",
