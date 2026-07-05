@@ -141,6 +141,13 @@ payload = visualize_algorithm(
 ```
 This keeps browser delivery on the same public function instead of introducing a browser-only API surface.
 
+### Browser wheel artifact
+Build a browser-safe `codeflow_py` wheel without runtime dependencies:
+```bash
+python3 scripts/build_browser_wheel.py
+```
+By default the artifact is written to `dist/browser-wheels/`.
+
 ## Demo gallery
 Run the end-to-end showcase to regenerate every artifact (array layouts, graph mappings with edge labels, DP matrices, numpy-nested payloads, and several StepTracer cases such as bubble sort, BFS queue state, DP tables, and graph snapshots):
 ```bash
