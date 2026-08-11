@@ -37,6 +37,7 @@ class VariableTraceEvent:
 class TraceManifestStep:
     step_id: str
     timeline_key: str
+    event_order: int | None
     index: int
     execution_id: int | None
     order: int | None

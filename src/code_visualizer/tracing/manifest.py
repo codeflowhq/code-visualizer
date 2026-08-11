@@ -16,6 +16,7 @@ from .types import (
 
 def build_manifest_step(frame: RenderedTraceFrame) -> TraceManifestStep:
     meta = dict(frame.meta)
+    event_order = meta.get("var_id")
     execution_id = meta.get("execution_id")
     order = meta.get("order")
     timeline_key = (
@@ -27,6 +28,7 @@ def build_manifest_step(frame: RenderedTraceFrame) -> TraceManifestStep:
     return TraceManifestStep(
         step_id=step_id,
         timeline_key=timeline_key,
+        event_order=int(event_order) if event_order is not None else None,
         index=frame.step,
         execution_id=execution_id,
         order=order,

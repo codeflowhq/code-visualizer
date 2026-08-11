@@ -17,7 +17,29 @@ def test_visualize_algorithm_manifest_payload_exposes_step_identity() -> None:
     step = payload["manifest"][0]["steps"][0]
     assert step["step_id"] == "step 1"
     assert step["timeline_key"] == "0:1"
+    assert step["event_order"] == 1
     assert step["title"] is None
+
+
+def test_visualize_algorithm_manifest_payload_uses_var_id_as_event_order() -> None:
+    payload = visualize_algorithm(
+        "data = []\nother = []\nfor index in range(2):\n    data.append(index)\nother = list(data)\n",
+        watch_variables=["data", "other"],
+        output="manifest",
+        payload=True,
+    )
+
+    steps_by_variable = {
+        entry["variable"]: entry["steps"]
+        for entry in payload["manifest"]
+    }
+
+    data_event_orders = [step["event_order"] for step in steps_by_variable["data"]]
+    other_event_orders = [step["event_order"] for step in steps_by_variable["other"]]
+
+    assert data_event_orders == sorted(data_event_orders)
+    assert other_event_orders == sorted(other_event_orders)
+    assert data_event_orders[-1] < other_event_orders[-1]
 
 
 def test_resolve_recursion_depth_prefers_variable_override_but_clamps_to_global_max() -> (
