@@ -7,6 +7,7 @@ from ....utils.value_formatting import (
     estimate_table_column_widths as _estimate_table_column_widths,
 )
 from ....utils.value_formatting import table_cell_text as _table_cell_text
+from ....utils.value_shapes import _is_scalar_value
 from ...shared.theme import BG_HEADER_MUTED
 from ..labels import html_cell, html_row, html_table
 
@@ -51,10 +52,17 @@ def dict_html(
                 nested_renderer,
                 f"{slot_name}.{_table_cell_text(key)}",
             )
+            value_align = "center" if _is_scalar_value(item_value) else "left"
+            value_padding = "4" if _is_scalar_value(item_value) else "0"
             rows.append(
                 html_row(
                     html_cell(_table_cell_text(key), width=key_width, align="center"),
-                    html_cell(value_html, width=value_width, align="center"),
+                    html_cell(
+                        value_html,
+                        width=value_width,
+                        align=value_align,
+                        cellpadding=value_padding,
+                    ),
                 )
             )
         if len(items) > max_items:

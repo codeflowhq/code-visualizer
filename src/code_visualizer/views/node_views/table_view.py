@@ -76,6 +76,23 @@ def _node_frame(inner_html: str, total_width: int) -> str:
     )
 
 
+def _stretch_nested_value_html(value_html: str, value_width: int) -> str:
+    stripped = value_html.strip()
+    if not stripped.startswith("<table"):
+        return value_html
+
+    open_match = re.match(r"^<table\b([^>]*)>", stripped)
+    if not open_match:
+        return value_html
+
+    attrs = open_match.group(1) or ""
+    if re.search(r"\b(?:WIDTH|width)=", attrs):
+        return value_html
+
+    stretched_open = f"<table{attrs} WIDTH='{value_width}'>"
+    return stretched_open + stripped[open_match.end() :]
+
+
 def _two_column_row(
     key_html: str,
     value_html: str,
@@ -85,6 +102,8 @@ def _two_column_row(
     key_fill: str,
     value_fill: str,
     value_port: str | None = None,
+    value_align: str = "CENTER",
+    value_cellpadding: str = "6",
 ) -> str:
     key_cell = html_cell(
         key_html,
@@ -97,9 +116,9 @@ def _two_column_row(
     value_attrs: dict[str, object] = {
         "WIDTH": value_width,
         "FIXEDSIZE": "TRUE",
-        "ALIGN": "CENTER",
+        "ALIGN": value_align,
         "BGCOLOR": value_fill,
-        "CELLPADDING": "6",
+        "CELLPADDING": value_cellpadding,
     }
     if value_port is not None:
         value_attrs["PORT"] = value_port
@@ -199,19 +218,32 @@ def build_table_view_node_rows(
         value_port = f"{row_id}_value"
         if _is_scalar_value(val):
             value_html = _format_scalar_html(val)
+            value_align = "CENTER"
+            value_cellpadding = "6"
         else:
             value_html = _format_nested_value(
                 val, inner_depth, item_limit, None, f"{name}.{key}"
             )
             if not value_html:
                 value_html = _format_container_stub(val)
+            value_html = _stretch_nested_value_html(value_html, value_width)
             value_html = html_table(
-                html_row(html_cell(value_html, width=value_width, align="center")),
+                html_row(
+                    html_cell(
+                        value_html,
+                        width=value_width,
+                        align="left",
+                        valign="middle",
+                        cellpadding="0",
+                    )
+                ),
                 border="0",
                 cellborder="0",
                 cellspacing="0",
                 cellpadding="0",
             )
+            value_align = "LEFT"
+            value_cellpadding = "0"
 
         is_focused = focused_key is not None and str(focused_key) == str(key_text)
         if accent_color is not None:
@@ -253,6 +285,8 @@ def build_table_view_node_rows(
             key_fill=key_fill,
             value_fill=value_fill,
             value_port=value_port,
+            value_align=value_align,
+            value_cellpadding=value_cellpadding,
         )
         row_label = _node_frame(row_inner, total_width)
         graph.add_node(

@@ -182,6 +182,51 @@ def test_table_view_inlines_nested_dict_html_inside_the_value_cell() -> None:
     }
 
 
+def test_table_view_left_aligns_nested_value_previews() -> None:
+    value = {
+        "mask": 21,
+        "selected": [0, 2, 4],
+    }
+    _, graph = build_graph_view(value, "data", ViewKind.TABLE, 3, item_limit=10)
+
+    selected_row = graph.nodes["table_row_data_selected"].label
+
+    assert "ALIGN='LEFT'" in selected_row
+    assert "CELLPADDING='0'" in selected_row
+    assert "selected" in selected_row
+
+
+def test_table_view_left_aligns_nested_dict_value_cells() -> None:
+    value = {
+        "name": "Alice",
+        "meta": {"level": 1, "track": "math"},
+    }
+    _, graph = build_graph_view(value, "data", ViewKind.TABLE, 3, item_limit=10)
+
+    meta_row = graph.nodes["table_row_data_meta"].label
+
+    assert "ALIGN='LEFT'" in meta_row
+    assert "CELLPADDING='0'" in meta_row
+
+
+def test_table_view_stretches_nested_dict_preview_to_outer_value_width() -> None:
+    import re
+
+    value = {
+        "name": "Alice",
+        "meta": {"level": 1, "track": "math"},
+    }
+    _, graph = build_graph_view(value, "data", ViewKind.TABLE, 3, item_limit=10)
+
+    header = graph.nodes["table_header_data"].label
+    meta_row = graph.nodes["table_row_data_meta"].label
+
+    header_widths = re.findall(r"(?:WIDTH|width)='(\d+)'", header)
+    header_value_width = header_widths[-1] if header_widths else None
+    assert header_value_width is not None
+    assert meta_row.count(f"WIDTH='{header_value_width}'") >= 2
+
+
 def test_tree_view_preserves_node_identity_when_children_swap() -> None:
     original = {
         "label": "root",
