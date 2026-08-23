@@ -81,16 +81,108 @@ def _stretch_nested_value_html(value_html: str, value_width: int) -> str:
     if not stripped.startswith("<table"):
         return value_html
 
+    sequence_wrapper_match = re.search(
+        r"<table\b([^>]*)\bid='([^']*-wrapper)'([^>]*)>", stripped
+    )
+    if sequence_wrapper_match:
+        stretched = stripped
+        wrapper_open = sequence_wrapper_match.group(0)
+        if not re.search(r"\b(?:WIDTH|width)=", wrapper_open):
+            stretched_wrapper_open = wrapper_open[:-1] + f" WIDTH='{value_width}'>"
+            stretched = stretched.replace(wrapper_open, stretched_wrapper_open, 1)
+
+        value_table_match = re.search(
+            r"<table\b([^>]*)\bid='([^']*-value-table)'([^>]*)>", stretched
+        )
+        if value_table_match:
+            value_table_open = value_table_match.group(0)
+            if not re.search(r"\b(?:WIDTH|width)=", value_table_open):
+                stretched_value_table_open = (
+                    value_table_open[:-1] + f" WIDTH='{value_width}'>"
+                )
+                stretched = stretched.replace(
+                    value_table_open, stretched_value_table_open, 1
+                )
+
+        nested_item_cells = re.findall(
+            r"<td align='center' bgcolor='#ffffff' cellpadding='4'><table",
+            stretched,
+        )
+        scalar_item_cells = re.findall(
+            r"<td align='center' bgcolor='#ffffff' cellpadding='4'>",
+            stretched,
+        )
+        item_count = len(nested_item_cells) or len(scalar_item_cells)
+        if item_count:
+            cell_width = max(34, value_width // item_count)
+            if nested_item_cells:
+                stretched = stretched.replace(
+                    "<td align='center' bgcolor='#ffffff' cellpadding='4'><table",
+                    (
+                        f"<td width='{cell_width}' align='center'"
+                        " bgcolor='#ffffff' cellpadding='4'><table"
+                    ),
+                )
+            else:
+                stretched = stretched.replace(
+                    "<td align='center' bgcolor='#ffffff' cellpadding='4'>",
+                    (
+                        f"<td width='{cell_width}' align='center'"
+                        " bgcolor='#ffffff' cellpadding='4'>"
+                    ),
+                )
+            stretched = stretched.replace(
+                "<td align='center'><font color='#dc2626' point-size='12'>",
+                (
+                    f"<td width='{cell_width}' align='center'>"
+                    "<font color='#dc2626' point-size='12'>"
+                ),
+            )
+        return stretched
+
+    header_match = re.search(
+        r"^<table\b[^>]*><tr><td width='(\d+)'[^>]*><b>Key</b></td><td width='(\d+)'[^>]*><b>Value</b></td>",
+        stripped,
+    )
+    if not header_match:
+        return value_html
+
     open_match = re.match(r"^<table\b([^>]*)>", stripped)
     if not open_match:
         return value_html
 
     attrs = open_match.group(1) or ""
-    if re.search(r"\b(?:WIDTH|width)=", attrs):
-        return value_html
+    stretched = stripped
+    if not re.search(r"\b(?:WIDTH|width)=", attrs):
+        stretched_open = f"<table{attrs} WIDTH='{value_width}'>"
+        stretched = stretched_open + stripped[open_match.end() :]
 
-    stretched_open = f"<table{attrs} WIDTH='{value_width}'>"
-    return stretched_open + stripped[open_match.end() :]
+    inner_match = re.search(r"<table\b([^>]*)\bid='[^']*-value-table'([^>]*)>", stretched)
+    if inner_match:
+        inner_open = inner_match.group(0)
+        if not re.search(r"\b(?:WIDTH|width)=", inner_open):
+            inner_stretched_open = inner_open[:-1] + f" WIDTH='{value_width}'>"
+            stretched = stretched.replace(inner_open, inner_stretched_open, 1)
+
+    nested_key_width = int(header_match.group(1))
+    nested_value_width = int(header_match.group(2))
+    target_nested_value_width = max(
+        nested_value_width,
+        value_width - nested_key_width,
+    )
+    if target_nested_value_width == nested_value_width:
+        return stretched
+
+    row_pattern = re.compile(
+        rf"(<tr><td width='{nested_key_width}'[^>]*>.*?</td><td width=')"
+        rf"{nested_value_width}"
+        rf"('[^>]*>)",
+        flags=re.DOTALL,
+    )
+    return row_pattern.sub(
+        rf"\g<1>{target_nested_value_width}\g<2>",
+        stretched,
+    )
 
 
 def _two_column_row(
@@ -233,7 +325,7 @@ def build_table_view_node_rows(
                         value_html,
                         width=value_width,
                         align="left",
-                        valign="middle",
+                        valign="top",
                         cellpadding="0",
                     )
                 ),

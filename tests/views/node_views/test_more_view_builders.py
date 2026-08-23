@@ -209,7 +209,7 @@ def test_table_view_left_aligns_nested_dict_value_cells() -> None:
     assert "CELLPADDING='0'" in meta_row
 
 
-def test_table_view_stretches_nested_dict_preview_to_outer_value_width() -> None:
+def test_table_view_sizes_nested_dict_preview_from_content_width() -> None:
     import re
 
     value = {
@@ -224,7 +224,98 @@ def test_table_view_stretches_nested_dict_preview_to_outer_value_width() -> None
     header_widths = re.findall(r"(?:WIDTH|width)='(\d+)'", header)
     header_value_width = header_widths[-1] if header_widths else None
     assert header_value_width is not None
-    assert meta_row.count(f"WIDTH='{header_value_width}'") >= 2
+    assert int(header_value_width) < 232
+    assert meta_row.count(f"WIDTH='{header_value_width}'") >= 1
+    assert "valign='top'" in meta_row
+
+
+def test_table_view_sizes_nested_sequence_preview_from_content_width() -> None:
+    import re
+
+    value = {
+        "mask": 1,
+        "selected": [0, 2, 4],
+    }
+    _, graph = build_graph_view(value, "data", ViewKind.TABLE, 3, item_limit=10)
+
+    header = graph.nodes["table_header_data"].label
+    selected_row = graph.nodes["table_row_data_selected"].label
+
+    header_widths = re.findall(r"(?:WIDTH|width)='(\d+)'", header)
+    header_value_width = header_widths[-1] if header_widths else None
+    assert header_value_width is not None
+    assert int(header_value_width) < 180
+    assert "cv-data-selected-value-table" in selected_row
+
+
+def test_table_view_stretches_nested_sequence_cells_to_fill_value_width() -> None:
+    import re
+
+    value = {
+        "mask": 21,
+        "selected": [0, 2, 4],
+    }
+    _, graph = build_graph_view(value, "data", ViewKind.TABLE, 3, item_limit=10)
+
+    selected_row = graph.nodes["table_row_data_selected"].label
+    cell_widths = re.findall(
+        r"<td width='(\d+)' align='center' bgcolor='#ffffff' cellpadding='4'>",
+        selected_row,
+    )
+    index_widths = re.findall(r"<td width='(\d+)' align='center'>", selected_row)
+
+    assert cell_widths[:3] == ["34", "34", "34"]
+    assert index_widths[:3] == ["34", "34", "34"]
+
+
+def test_table_view_sizes_sequence_of_dicts_without_stretching_child_tables() -> None:
+    import re
+
+    value = {
+        "users": [
+            {"id": 1, "tags": ["a", "b"]},
+            {"id": 2, "tags": ["z", "d"]},
+        ],
+        "meta": {"page": 1, "total": 2},
+    }
+    _, graph = build_graph_view(value, "data", ViewKind.TABLE, 3, item_limit=10)
+
+    header = graph.nodes["table_header_data"].label
+    users_row = graph.nodes["table_row_data_users"].label
+
+    header_widths = re.findall(r"(?:WIDTH|width)='(\d+)'", header)
+    header_value_width = int(header_widths[-1]) if header_widths else 0
+    child_dict_value_widths = [int(width) for width in re.findall(r"<td width='(\d+)' align='center' cellpadding='4'><font point-size=\"12\" color=\"#0f172a\">[12]</font></td>", users_row)]
+
+    assert header_value_width > 368
+    assert child_dict_value_widths
+    assert all(width < header_value_width for width in child_dict_value_widths)
+
+
+def test_table_view_stretches_sequence_of_dicts_to_the_available_value_width() -> None:
+    import re
+
+    value = {
+        "users": [
+            {"id": 1, "tags": ["a", "b"]},
+            {"id": 2, "tags": ["z", "d"]},
+        ],
+        "meta": {"page": 1, "total": 2},
+    }
+    _, graph = build_graph_view(value, "data", ViewKind.TABLE, 3, item_limit=10)
+
+    users_row = graph.nodes["table_row_data_users"].label
+    direct_cell_widths = re.findall(
+        r"<td width='(\d+)' align='center' bgcolor='#ffffff' cellpadding='4'><table",
+        users_row,
+    )
+    index_widths = re.findall(
+        r"<td width='(\d+)' align='center'><font color='#dc2626' point-size='12'>",
+        users_row,
+    )
+
+    assert direct_cell_widths == ["196", "196"]
+    assert index_widths == ["196", "196"]
 
 
 def test_tree_view_preserves_node_identity_when_children_swap() -> None:

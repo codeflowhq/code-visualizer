@@ -148,6 +148,15 @@ python3 scripts/build_browser_wheel.py
 ```
 By default the artifact is written to `dist/browser-wheels/`.
 
+GitHub Actions also builds a browser wheel artifact on pushes, pull requests, and manual runs.
+When the workflow runs on a tag such as `v0.1.0`, it publishes a fixed-name release asset:
+
+```text
+https://github.com/codeflowhq/codeflow-py/releases/latest/download/codeflow_py-browser.whl
+```
+
+The web app should consume that release URL instead of vendoring Python sources or rebuilding the package locally.
+
 ## Demo gallery
 Run the end-to-end showcase to regenerate every artifact (array layouts, graph mappings with edge labels, DP matrices, numpy-nested payloads, and several StepTracer cases such as bubble sort, BFS queue state, DP tables, and graph snapshots):
 ```bash
