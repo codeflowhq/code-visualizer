@@ -23,6 +23,7 @@ def _strip_dependencies(pyproject_text: str) -> str:
 
 
 def _build_browser_wheel(out_dir: Path) -> Path:
+    out_dir = out_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     for existing in out_dir.glob("codeflow_py-*.whl"):
         existing.unlink()
@@ -64,9 +65,10 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    wheel_path = _build_browser_wheel(args.out_dir)
+    resolved_out_dir = args.out_dir.resolve()
+    wheel_path = _build_browser_wheel(resolved_out_dir)
     print(f"built browser wheel: {wheel_path}")
-    print(f"fixed browser wheel: {args.out_dir / 'codeflow_py-browser.whl'}")
+    print(f"fixed browser wheel: {resolved_out_dir / 'codeflow_py-browser.whl'}")
 
 
 if __name__ == "__main__":
