@@ -8,6 +8,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-browser-wheel:
     runs-on: ubuntu-latest
@@ -18,9 +21,7 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v5
       - name: Build browser wheel
-        run: |
-          python3 scripts/build_browser_wheel.py --out-dir dist/browser-wheels
-          cp dist/browser-wheels/codeflow_py-*.whl dist/browser-wheels/codeflow_py-browser.whl
+        run: python3 scripts/build_browser_wheel.py --out-dir dist/browser-wheels
       - name: Upload browser wheel artifact
         uses: actions/upload-artifact@v4
         with:

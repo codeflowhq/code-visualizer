@@ -26,6 +26,9 @@ def _build_browser_wheel(out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     for existing in out_dir.glob("codeflow_py-*.whl"):
         existing.unlink()
+    fixed_name_wheel = out_dir / "codeflow_py-browser.whl"
+    if fixed_name_wheel.exists():
+        fixed_name_wheel.unlink()
 
     with tempfile.TemporaryDirectory(prefix="codeflow_py_browser_build_") as temp_dir:
         temp_root = Path(temp_dir)
@@ -46,7 +49,9 @@ def _build_browser_wheel(out_dir: Path) -> Path:
     wheels = sorted(out_dir.glob("codeflow_py-*.whl"))
     if not wheels:
         raise SystemExit("Failed to build browser wheel for codeflow-py")
-    return wheels[-1]
+    wheel_path = wheels[-1]
+    shutil.copyfile(wheel_path, fixed_name_wheel)
+    return wheel_path
 
 
 def main() -> None:
@@ -61,6 +66,7 @@ def main() -> None:
 
     wheel_path = _build_browser_wheel(args.out_dir)
     print(f"built browser wheel: {wheel_path}")
+    print(f"fixed browser wheel: {args.out_dir / 'codeflow_py-browser.whl'}")
 
 
 if __name__ == "__main__":
