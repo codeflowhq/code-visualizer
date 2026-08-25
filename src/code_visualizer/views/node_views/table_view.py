@@ -59,6 +59,12 @@ def _table_column_widths(
     return key_width, value_width, total_width
 
 
+def _nested_row_inner_width(items: list[tuple[Any, Any]], value_width: int) -> int:
+    if not any(not _is_scalar_value(value) for _, value in items):
+        return value_width
+    return max(64, value_width - 4)
+
+
 def _node_frame(inner_html: str, total_width: int) -> str:
     return html_table(
         html_row(
@@ -82,18 +88,372 @@ def _inject_table_width(opening_tag: str, width: int) -> str:
     return opening_tag[:-1] + f" WIDTH='{width}'>"
 
 
+def _set_table_width(opening_tag: str, width: int) -> str:
+    if re.search(r"\bWIDTH='[^']*'", opening_tag):
+        return re.sub(r"\bWIDTH='[^']*'", f"WIDTH='{width}'", opening_tag)
+    if re.search(r"\bwidth='[^']*'", opening_tag):
+        return re.sub(r"\bwidth='[^']*'", f"width='{width}'", opening_tag)
+    return opening_tag[:-1] + f" WIDTH='{width}'>"
+
+
+def _stretch_wrapper_table_html(
+    stripped: str, value_width: int, *, shrink_to_fit: bool
+) -> str | None:
+    wrapper_open_match = re.match(r"^<table\b([^>]*)>", stripped)
+    if not wrapper_open_match:
+        return None
+
+    wrapper_open = wrapper_open_match.group(0)
+    wrapper_attrs = wrapper_open_match.group(1) or ""
+    if "cellborder='0'" not in wrapper_attrs or "cellspacing='0'" not in wrapper_attrs:
+        return None
+
+    td_match = re.search(r"<td\b([^>]*)>", stripped[wrapper_open_match.end() :])
+    if td_match is None:
+        return None
+
+    td_open = td_match.group(0)
+    td_attrs = td_match.group(1) or ""
+    if "FIXEDSIZE='TRUE'" not in td_attrs:
+        return None
+
+    td_start = wrapper_open_match.end() + td_match.start()
+    td_content_start = td_start + len(td_open)
+    extracted = _extract_balanced_table(stripped, td_content_start)
+    if extracted is None:
+        return None
+
+    inner_table_html, inner_table_end = extracted
+    fitted_inner = _stretch_nested_value_html(
+        inner_table_html,
+        value_width,
+        shrink_to_fit=shrink_to_fit,
+    )
+
+    stretched = stripped.replace(wrapper_open, _set_table_width(wrapper_open, value_width), 1)
+    stretched = stretched.replace(
+        td_open,
+        re.sub(r"width='\d+'", f"width='{value_width}'", td_open, count=1),
+        1,
+    )
+    return (
+        stretched[:td_content_start]
+        + fitted_inner
+        + stretched[inner_table_end:]
+    )
+
+
+def _extract_balanced_table(html: str, start_index: int) -> tuple[str, int] | None:
+    if not html.startswith("<table", start_index):
+        return None
+
+    depth = 1
+    cursor = start_index + len("<table")
+    while depth > 0:
+        next_open = html.find("<table", cursor)
+        next_close = html.find("</table>", cursor)
+        if next_close == -1:
+            return None
+        if next_open != -1 and next_open < next_close:
+            depth += 1
+            cursor = next_open + len("<table")
+            continue
+        depth -= 1
+        cursor = next_close + len("</table>")
+    return html[start_index:cursor], cursor
+
+
+def _find_top_level_rows(table_html: str) -> list[tuple[int, int]]:
+    rows: list[tuple[int, int]] = []
+    depth = 0
+    row_start: int | None = None
+    cursor = 0
+    while cursor < len(table_html):
+        if table_html.startswith("<table", cursor):
+            depth += 1
+            cursor += len("<table")
+            continue
+        if table_html.startswith("</table>", cursor):
+            depth -= 1
+            cursor += len("</table>")
+            continue
+        if depth == 1 and table_html.startswith("<tr>", cursor):
+            row_start = cursor
+            cursor += len("<tr>")
+            continue
+        if depth == 1 and row_start is not None and table_html.startswith("</tr>", cursor):
+            row_end = cursor + len("</tr>")
+            rows.append((row_start, row_end))
+            row_start = None
+            cursor = row_end
+            continue
+        cursor += 1
+    return rows
+
+
+def _find_top_level_cells(row_html: str) -> list[tuple[int, int, int, int]]:
+    cells: list[tuple[int, int, int, int]] = []
+    table_depth = 0
+    cell_start: int | None = None
+    cell_tag_end: int | None = None
+    cursor = 0
+    while cursor < len(row_html):
+        if row_html.startswith("<table", cursor):
+            table_depth += 1
+            cursor += len("<table")
+            continue
+        if row_html.startswith("</table>", cursor):
+            table_depth -= 1
+            cursor += len("</table>")
+            continue
+        if table_depth == 0 and row_html.startswith("<td", cursor):
+            tag_end = row_html.find(">", cursor)
+            if tag_end == -1:
+                break
+            cell_start = cursor
+            cell_tag_end = tag_end + 1
+            cursor = cell_tag_end
+            continue
+        if (
+            table_depth == 0
+            and cell_start is not None
+            and cell_tag_end is not None
+            and row_html.startswith("</td>", cursor)
+        ):
+            cells.append((cell_start, cell_tag_end, cell_tag_end, cursor))
+            cell_start = None
+            cell_tag_end = None
+            cursor += len("</td>")
+            continue
+        cursor += 1
+    return cells
+
+
+def _rewrite_top_level_dict_column_widths(
+    table_html: str,
+    target_key_width: int,
+    target_value_width: int,
+) -> str:
+    rewritten = table_html
+    row_offsets = _find_top_level_rows(table_html)
+    delta = 0
+    for start, end in row_offsets:
+        row_html = rewritten[start + delta : end + delta]
+        td_matches = list(
+            re.finditer(r"<td width='(\d+)'[^>]*>", row_html)
+        )
+        if len(td_matches) < 2:
+            continue
+
+        first_match = td_matches[0]
+        second_match = td_matches[1]
+        updated_row = row_html
+        updated_row = (
+            updated_row[: first_match.start()]
+            + re.sub(
+                r"width='\d+'",
+                f"width='{target_key_width}'",
+                first_match.group(0),
+                count=1,
+            )
+            + updated_row[first_match.end() :]
+        )
+
+        second_matches = list(
+            re.finditer(r"<td width='(\d+)'[^>]*>", updated_row)
+        )
+        if len(second_matches) < 2:
+            continue
+        second_match = second_matches[1]
+        updated_row = (
+            updated_row[: second_match.start()]
+            + re.sub(
+                r"width='\d+'",
+                f"width='{target_value_width}'",
+                second_match.group(0),
+                count=1,
+            )
+            + updated_row[second_match.end() :]
+        )
+
+        rewritten = (
+            rewritten[: start + delta]
+            + updated_row
+            + rewritten[end + delta :]
+        )
+        delta += len(updated_row) - len(row_html)
+    return rewritten
+
+
+def _fit_top_level_dict_nested_tables(table_html: str, target_width: int) -> str:
+    rewritten = table_html
+    row_offsets = _find_top_level_rows(table_html)
+    delta = 0
+    for start, end in row_offsets:
+        row_html = rewritten[start + delta : end + delta]
+        cells = _find_top_level_cells(row_html)
+        if len(cells) < 2:
+            continue
+
+        value_cell_start, value_tag_end, content_start, content_end = cells[1]
+        value_cell_open = row_html[value_cell_start:value_tag_end]
+        adjusted_value_cell_open = re.sub(
+            r"width='\d+'",
+            f"width='{target_width}'",
+            value_cell_open,
+            count=1,
+        )
+
+        nested_html = row_html[content_start:content_end]
+        if not nested_html.startswith("<table"):
+            updated_row = (
+                row_html[:value_cell_start]
+                + adjusted_value_cell_open
+                + row_html[value_tag_end:]
+            )
+        else:
+            extracted = _extract_balanced_table(nested_html, 0)
+            if extracted is None:
+                continue
+            nested_table_html, nested_end = extracted
+            fitted_nested = _stretch_nested_value_html(
+                nested_table_html,
+                target_width,
+                shrink_to_fit=True,
+            )
+            updated_row = (
+                row_html[:value_cell_start]
+                + adjusted_value_cell_open
+                + fitted_nested
+                + nested_html[nested_end:]
+                + row_html[content_end:]
+            )
+
+        rewritten = (
+            rewritten[: start + delta]
+            + updated_row
+            + rewritten[end + delta :]
+        )
+        delta += len(updated_row) - len(row_html)
+    return rewritten
+
+
+def _fit_nested_table_cells(
+    html: str,
+    target_width: int,
+    td_pattern: re.Pattern[str],
+    *,
+    update_cell_width: bool,
+) -> str:
+    parts: list[str] = []
+    cursor = 0
+    while True:
+        match = td_pattern.search(html, cursor)
+        if match is None:
+            parts.append(html[cursor:])
+            return "".join(parts)
+
+        parts.append(html[cursor:match.start()])
+        content_start = match.end()
+        if not html.startswith("<table", content_start):
+            parts.append(match.group(0))
+            cursor = match.end()
+            continue
+
+        extracted = _extract_balanced_table(html, content_start)
+        if extracted is None:
+            parts.append(match.group(0))
+            cursor = match.end()
+            continue
+
+        table_html, table_end = extracted
+        fitted_table = _stretch_nested_value_html(
+            table_html,
+            target_width,
+            shrink_to_fit=True,
+        )
+        if update_cell_width:
+            adjusted_td = re.sub(
+                r"width='\d+'",
+                f"width='{target_width}'",
+                match.group(0),
+                count=1,
+            )
+            parts.append(adjusted_td)
+        else:
+            parts.append(match.group(0))
+        parts.append(fitted_table)
+        cursor = table_end
+
+
+def _normalize_sequence_index_widths(html: str) -> str:
+    value_row_pattern = re.compile(
+        r"<tr id='([^']*-value-row)'>(.*?)</tr>",
+        flags=re.DOTALL,
+    )
+    normalized = html
+    for match in value_row_pattern.finditer(html):
+        value_row_id = match.group(1)
+        index_row_id = value_row_id.replace("-value-row", "-index-row")
+        cell_widths = re.findall(r"<td width='(\d+)'", match.group(2))
+        if not cell_widths:
+            continue
+
+        index_row_pattern = re.compile(
+            rf"(<tr id='{re.escape(index_row_id)}'>)(.*?)(</tr>)",
+            flags=re.DOTALL,
+        )
+        index_row_match = index_row_pattern.search(normalized)
+        if index_row_match is None:
+            continue
+
+        index_cells = re.findall(
+            r"<td(?: width='[^']*')? align='center'><font color='#dc2626' point-size='12'>.*?</td>",
+            index_row_match.group(2),
+        )
+        if len(index_cells) != len(cell_widths):
+            continue
+
+        rewritten_cells = []
+        for cell_html, cell_width in zip(index_cells, cell_widths, strict=True):
+            if "width='" in cell_html:
+                rewritten_cells.append(
+                    re.sub(r"width='[^']*'", f"width='{cell_width}'", cell_html, count=1)
+                )
+            else:
+                rewritten_cells.append(
+                    cell_html.replace(
+                        "<td align='center'>",
+                        f"<td width='{cell_width}' align='center'>",
+                        1,
+                    )
+                )
+        rewritten_row = "".join(rewritten_cells)
+        normalized = index_row_pattern.sub(
+            rf"\g<1>{rewritten_row}\g<3>",
+            normalized,
+            count=1,
+        )
+    return normalized
+
+
 def _stretch_sequence_preview_html(stripped: str, value_width: int) -> str | None:
-    sequence_wrapper_match = re.search(
-        r"<table\b([^>]*)\bid='([^']*-wrapper)'([^>]*)>", stripped
+    cell_pattern = r"<td(?: width='\d+')? align='center' bgcolor='#ffffff' cellpadding='(\d+)'>"
+    nested_cell_pattern = (
+        r"<td(?: width='\d+')? align='center' bgcolor='#ffffff' cellpadding='(\d+)'><table"
+    )
+    sequence_wrapper_match = re.match(
+        r"^<table\b([^>]*)\bid='([^']*-wrapper)'([^>]*)>", stripped
     )
     if not sequence_wrapper_match:
         return None
+    wrapper_id = sequence_wrapper_match.group(2)
 
     stretched = stripped
     wrapper_open = sequence_wrapper_match.group(0)
     stretched = stretched.replace(
         wrapper_open,
-        _inject_table_width(wrapper_open, value_width),
+        _set_table_width(wrapper_open, value_width),
         1,
     )
 
@@ -104,51 +464,82 @@ def _stretch_sequence_preview_html(stripped: str, value_width: int) -> str | Non
         value_table_open = value_table_match.group(0)
         stretched = stretched.replace(
             value_table_open,
-            _inject_table_width(value_table_open, value_width),
+            _set_table_width(value_table_open, value_width),
             1,
         )
 
     nested_item_cells = re.findall(
-        r"<td align='center' bgcolor='#ffffff' cellpadding='4'><table",
+        nested_cell_pattern,
         stretched,
     )
     scalar_item_cells = re.findall(
-        r"<td align='center' bgcolor='#ffffff' cellpadding='4'>",
+        cell_pattern,
         stretched,
     )
     item_count = len(nested_item_cells) or len(scalar_item_cells)
     if item_count == 0:
         return stretched
 
-    cell_width = max(34, value_width // item_count)
+    inner_available_width = max(1, value_width)
+    cell_width = max(1, inner_available_width // item_count)
+    nested_content_width = max(1, cell_width - 8)
     if nested_item_cells:
-        stretched = stretched.replace(
-            "<td align='center' bgcolor='#ffffff' cellpadding='4'><table",
-            (
-                f"<td width='{cell_width}' align='center'"
-                " bgcolor='#ffffff' cellpadding='4'><table"
+        stretched = re.sub(
+            nested_cell_pattern,
+            lambda match: (
+                f"<td width='{cell_width}' align='center' bgcolor='#ffffff' "
+                f"cellpadding='{match.group(1)}'><table"
             ),
+            stretched,
+        )
+        stretched = re.sub(
+            r"(<td width='\d+' align='center' bgcolor='#ffffff' cellpadding='\d+'>)"
+            r"<table\b([^>]*)>",
+            lambda match: (
+                f"{match.group(1)}"
+                f"{_set_table_width(match.group(0)[len(match.group(1)) :], nested_content_width)}"
+            ),
+            stretched,
+        )
+        stretched = _fit_child_dict_tables_within_sequence_html(
+            stretched,
+            nested_content_width,
         )
     else:
-        stretched = stretched.replace(
-            "<td align='center' bgcolor='#ffffff' cellpadding='4'>",
-            (
-                f"<td width='{cell_width}' align='center'"
-                " bgcolor='#ffffff' cellpadding='4'>"
+        stretched = re.sub(
+            cell_pattern,
+            lambda match: (
+                f"<td width='{cell_width}' align='center' bgcolor='#ffffff' "
+                f"cellpadding='{match.group(1)}'>"
             ),
+            stretched,
         )
-    return stretched.replace(
-        "<td align='center'><font color='#dc2626' point-size='12'>",
-        (
-            f"<td width='{cell_width}' align='center'>"
-            "<font color='#dc2626' point-size='12'>"
-        ),
+    index_row_id = wrapper_id.replace("-wrapper", "-index-row")
+    index_row_pattern = re.compile(
+        rf"(<tr id='{re.escape(index_row_id)}'>)(.*?)(</tr>)",
+        flags=re.DOTALL,
     )
+
+    def _rewrite_index_row(match: re.Match[str]) -> str:
+        row_body = re.sub(
+            r"<td(?: width='\d+')? align='center'><font color='#dc2626' point-size='12'>",
+            (
+                f"<td width='{cell_width}' align='center'>"
+                "<font color='#dc2626' point-size='12'>"
+            ),
+            match.group(2),
+        )
+        return f"{match.group(1)}{row_body}{match.group(3)}"
+
+    stretched = index_row_pattern.sub(_rewrite_index_row, stretched, count=1)
+    return stretched
 
 
 def _stretch_nested_dict_preview_html(
     stripped: str,
     value_width: int,
+    *,
+    shrink_to_fit: bool = False,
 ) -> str | None:
     header_match = re.search(
         r"^<table\b[^>]*><tr><td width='(\d+)'[^>]*><b>Key</b></td><td width='(\d+)'[^>]*><b>Value</b></td>",
@@ -172,45 +563,130 @@ def _stretch_nested_dict_preview_html(
         inner_open = inner_match.group(0)
         stretched = stretched.replace(
             inner_open,
-            _inject_table_width(inner_open, value_width),
+            _set_table_width(inner_open, value_width),
             1,
         )
 
     nested_key_width = int(header_match.group(1))
     nested_value_width = int(header_match.group(2))
-    target_nested_value_width = max(
-        nested_value_width,
-        value_width - nested_key_width,
-    )
-    if target_nested_value_width == nested_value_width:
-        return stretched
 
-    row_pattern = re.compile(
-        rf"(<tr><td width='{nested_key_width}'[^>]*>.*?</td><td width=')"
-        rf"{nested_value_width}"
-        rf"('[^>]*>)",
-        flags=re.DOTALL,
-    )
-    return row_pattern.sub(
-        rf"\g<1>{target_nested_value_width}\g<2>",
+    min_column_width = 34
+    if shrink_to_fit:
+        if value_width >= nested_key_width + min_column_width:
+            target_nested_key_width = nested_key_width
+            target_nested_value_width = value_width - target_nested_key_width
+        elif value_width >= min_column_width * 2:
+            target_nested_value_width = min_column_width
+            target_nested_key_width = value_width - target_nested_value_width
+        else:
+            target_nested_key_width = max(1, value_width // 2)
+            target_nested_value_width = max(1, value_width - target_nested_key_width)
+    else:
+        target_nested_key_width = nested_key_width
+        target_nested_value_width = max(
+            nested_value_width,
+            max(min_column_width, value_width - target_nested_key_width),
+        )
+
+    if (
+        target_nested_key_width != nested_key_width
+        or target_nested_value_width != nested_value_width
+    ):
+        stretched = _rewrite_top_level_dict_column_widths(
+            stretched,
+            target_nested_key_width,
+            target_nested_value_width,
+        )
+
+    return _fit_top_level_dict_nested_tables(
         stretched,
+        target_nested_value_width,
     )
 
 
-def _stretch_nested_value_html(value_html: str, value_width: int) -> str:
+def _fit_child_dict_tables_within_sequence_html(
+    stretched: str,
+    nested_content_width: int,
+) -> str:
+    child_cell_pattern = re.compile(
+        r"<td width='\d+' align='center' bgcolor='#ffffff' cellpadding='\d+'>"
+    )
+    parts: list[str] = []
+    cursor = 0
+    while True:
+        match = child_cell_pattern.search(stretched, cursor)
+        if match is None:
+            parts.append(stretched[cursor:])
+            return "".join(parts)
+
+        parts.append(stretched[cursor:match.end()])
+        content_start = match.end()
+        if not stretched.startswith("<table", content_start):
+            cursor = content_start
+            continue
+
+        extracted = _extract_balanced_table(stretched, content_start)
+        if extracted is None:
+            cursor = content_start
+            continue
+
+        table_html, table_end = extracted
+        fitted = _stretch_nested_dict_preview_html(
+            table_html,
+            nested_content_width,
+            shrink_to_fit=True,
+        )
+        parts.append(fitted if fitted is not None else table_html)
+        cursor = table_end
+
+
+def _stretch_nested_value_html(
+    value_html: str,
+    value_width: int,
+    *,
+    shrink_to_fit: bool = False,
+) -> str:
     stripped = value_html.strip()
     if not stripped.startswith("<table"):
         return value_html
+
+    wrapper_stretched = _stretch_wrapper_table_html(
+        stripped,
+        value_width,
+        shrink_to_fit=shrink_to_fit,
+    )
+    if wrapper_stretched is not None:
+        return wrapper_stretched
 
     sequence_stretched = _stretch_sequence_preview_html(stripped, value_width)
     if sequence_stretched is not None:
         return sequence_stretched
 
-    dict_stretched = _stretch_nested_dict_preview_html(stripped, value_width)
+    dict_stretched = _stretch_nested_dict_preview_html(
+        stripped,
+        value_width,
+        shrink_to_fit=shrink_to_fit,
+    )
     if dict_stretched is not None:
-        return dict_stretched
+        wrapped = html_table(
+            html_row(
+                html_cell(
+                    dict_stretched,
+                    width=value_width,
+                    FIXEDSIZE="TRUE",
+                    align="center",
+                    cellpadding="0",
+                )
+            ),
+            border="1",
+            cellborder="0",
+            cellspacing="0",
+            width=value_width,
+            cellpadding="0",
+        )
+        return _normalize_sequence_index_widths(wrapped)
 
-    return value_html
+    return _normalize_sequence_index_widths(value_html)
 
 
 def _two_column_row(
@@ -269,6 +745,7 @@ def build_table_view_node_rows(
     key_width, value_width, total_width = _table_column_widths(
         visible_items, item_limit
     )
+    nested_inner_width = _nested_row_inner_width(visible_items, value_width)
 
     graph = runtime.graph
     accent_color = normalize_hex_color(runtime.accent_color)
@@ -346,13 +823,14 @@ def build_table_view_node_rows(
             )
             if not value_html:
                 value_html = _format_container_stub(val)
-            value_html = _stretch_nested_value_html(value_html, value_width)
+            value_html = _stretch_nested_value_html(value_html, nested_inner_width)
             value_html = html_table(
                 html_row(
                     html_cell(
                         value_html,
-                        width=value_width,
-                        align="left",
+                        width=nested_inner_width,
+                        FIXEDSIZE="TRUE",
+                        align="center",
                         valign="top",
                         cellpadding="0",
                     )
@@ -362,7 +840,7 @@ def build_table_view_node_rows(
                 cellspacing="0",
                 cellpadding="0",
             )
-            value_align = "LEFT"
+            value_align = "CENTER"
             value_cellpadding = "0"
 
         is_focused = focused_key is not None and str(focused_key) == str(key_text)

@@ -11,8 +11,8 @@ from ...renderers.shared.theme import (
     BG_SURFACE,
     BORDER_DEFAULT,
     BORDER_FOCUS,
-    SUBTITLE_FONT_SIZE,
-    TEXT_MUTED,
+    INDEX_FONT_SIZE,
+    TEXT_INDEX,
     blend_hex_colors,
     normalize_hex_color,
 )
@@ -52,7 +52,7 @@ def _array_cell_label(
     value_fill: str,
     index: int,
 ) -> str:
-    return html_table(
+    value_table = html_table(
         html_row(
             html_cell(
                 content_html,
@@ -65,18 +65,25 @@ def _array_cell_label(
                 cellpadding="2",
             )
         ),
+        border="1",
+        cellborder="1",
+        cellspacing="0",
+        cellpadding="0",
+    )
+    return html_table(
+        html_row(html_cell(value_table, cellpadding="0")),
         html_row(
             html_cell(
                 html_font(
-                    str(index), {"color": TEXT_MUTED, "point-size": SUBTITLE_FONT_SIZE}
+                    str(index), {"color": TEXT_INDEX, "point-size": INDEX_FONT_SIZE}
                 ),
                 align="center",
                 bgcolor=BG_SURFACE,
                 cellpadding="1",
             )
         ),
-        border="1",
-        cellborder="1",
+        border="0",
+        cellborder="0",
         cellspacing="0",
         cellpadding="0",
     )

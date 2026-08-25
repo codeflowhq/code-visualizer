@@ -182,7 +182,7 @@ def test_table_view_inlines_nested_dict_html_inside_the_value_cell() -> None:
     }
 
 
-def test_table_view_left_aligns_nested_value_previews() -> None:
+def test_table_view_centers_nested_value_previews() -> None:
     value = {
         "mask": 21,
         "selected": [0, 2, 4],
@@ -191,12 +191,12 @@ def test_table_view_left_aligns_nested_value_previews() -> None:
 
     selected_row = graph.nodes["table_row_data_selected"].label
 
-    assert "ALIGN='LEFT'" in selected_row
+    assert "ALIGN='CENTER'" in selected_row
     assert "CELLPADDING='0'" in selected_row
     assert "selected" in selected_row
 
 
-def test_table_view_left_aligns_nested_dict_value_cells() -> None:
+def test_table_view_centers_nested_dict_value_cells() -> None:
     value = {
         "name": "Alice",
         "meta": {"level": 1, "track": "math"},
@@ -205,7 +205,7 @@ def test_table_view_left_aligns_nested_dict_value_cells() -> None:
 
     meta_row = graph.nodes["table_row_data_meta"].label
 
-    assert "ALIGN='LEFT'" in meta_row
+    assert "ALIGN='CENTER'" in meta_row
     assert "CELLPADDING='0'" in meta_row
 
 
@@ -226,6 +226,16 @@ def test_table_view_sizes_nested_dict_preview_from_content_width() -> None:
     assert header_value_width is not None
     assert int(header_value_width) < 232
     assert meta_row.count(f"WIDTH='{header_value_width}'") >= 1
+    assert f"width='{int(header_value_width) - 4}'" in meta_row
+    assert "FIXEDSIZE='TRUE'" in meta_row
+    assert (
+        f"<table border='1' cellborder='0' cellspacing='0' width='{int(header_value_width) - 4}' cellpadding='0'>"
+        in meta_row
+    )
+    assert (
+        f"<td width='{int(header_value_width) - 4}' FIXEDSIZE='TRUE' align='center' cellpadding='0'>"
+        in meta_row
+    )
     assert "valign='top'" in meta_row
 
 
@@ -248,6 +258,65 @@ def test_table_view_sizes_nested_sequence_preview_from_content_width() -> None:
     assert "cv-data-selected-value-table" in selected_row
 
 
+def test_table_view_shrinks_nested_dict_to_parent_value_budget() -> None:
+    value = {
+        "users": [
+            {"id": 1, "tags": ["a", "b"]},
+            {"id": {"1": 2}, "tags": ["c", "d"]},
+        ],
+        "meta": {"page": 1, "total": 2},
+    }
+    value["users"][1]["tags"][0] = "z"
+
+    _, graph = build_graph_view(value, "data", ViewKind.TABLE, 5, item_limit=10)
+
+    users_row = graph.nodes["table_row_data_users"].label
+
+    assert "width='140' align='left' cellpadding='0'" in users_row
+    assert "<td width='92' bgcolor='#f3f4f6' align='center'><b>Key</b></td>" in users_row
+    assert "<td width='48' bgcolor='#f3f4f6' align='center'><b>Value</b></td>" in users_row
+    assert "width='92' bgcolor='#f3f4f6' align='center'><b>Value</b></td>" not in users_row
+
+
+def test_table_view_shrinks_deep_nested_dict_key_and_value_within_parent_budget() -> None:
+    value = {
+        "users": [
+            {"id": 1, "tags": ["a", "b"]},
+            {"id": {"1": {"inner": [10, 20]}}, "tags": ["c", "d"]},
+        ],
+        "meta": {"page": 1, "total": 2},
+    }
+    value["users"][1]["id"]["1"]["inner"][0] = 99
+    value["users"][1]["tags"][0] = "z"
+
+    _, graph = build_graph_view(value, "data", ViewKind.TABLE, 5, item_limit=10)
+
+    users_row = graph.nodes["table_row_data_users"].label
+
+    assert "WIDTH='94'><tr><td width='60' bgcolor='#f3f4f6' align='center'><b>Key</b></td><td width='34' bgcolor='#f3f4f6' align='center'><b>Value</b></td></tr>" in users_row
+    assert "WIDTH='94'><tr><td width='92' bgcolor='#f3f4f6' align='center'><b>Key</b></td><td width='34' bgcolor='#f3f4f6' align='center'><b>Value</b></td></tr>" not in users_row
+
+
+def test_table_view_shrinks_deep_nested_sequence_cells_within_wrapper_width() -> None:
+    value = {
+        "users": [
+            {"id": 1, "tags": ["a", "b"]},
+            {"id": {"1": {"inner": [10, 20]}}, "tags": ["c", "d"]},
+        ],
+        "meta": {"page": 1, "total": 2},
+    }
+    value["users"][1]["id"]["1"]["inner"][0] = 99
+    value["users"][1]["tags"][0] = "z"
+
+    _, graph = build_graph_view(value, "data", ViewKind.TABLE, 6, item_limit=10)
+
+    users_row = graph.nodes["table_row_data_users"].label
+
+    assert "cv-data-users-1--id-1-inner-wrapper' border='0' cellborder='0' cellspacing='0' WIDTH='34'" in users_row
+    assert "<td width='17' align='center' bgcolor='#ffffff' cellpadding='2'><font point-size=\"12\" color=\"#0f172a\">99</font></td><td width='17' align='center' bgcolor='#ffffff' cellpadding='2'><font point-size=\"12\" color=\"#0f172a\">20</font></td>" in users_row
+    assert "<td width='34' align='center' bgcolor='#ffffff' cellpadding='2'><font point-size=\"12\" color=\"#0f172a\">99</font></td><td width='34' align='center' bgcolor='#ffffff' cellpadding='2'><font point-size=\"12\" color=\"#0f172a\">20</font></td>" not in users_row
+
+
 def test_table_view_stretches_nested_sequence_cells_to_fill_value_width() -> None:
     import re
 
@@ -259,16 +328,16 @@ def test_table_view_stretches_nested_sequence_cells_to_fill_value_width() -> Non
 
     selected_row = graph.nodes["table_row_data_selected"].label
     cell_widths = re.findall(
-        r"<td width='(\d+)' align='center' bgcolor='#ffffff' cellpadding='4'>",
+        r"<td width='(\d+)' align='center' bgcolor='#ffffff' cellpadding='2'>",
         selected_row,
     )
     index_widths = re.findall(r"<td width='(\d+)' align='center'>", selected_row)
 
-    assert cell_widths[:3] == ["34", "34", "34"]
-    assert index_widths[:3] == ["34", "34", "34"]
+    assert cell_widths[:3] == ["32", "32", "32"]
+    assert index_widths[:3] == ["32", "32", "32"]
 
 
-def test_table_view_sizes_sequence_of_dicts_without_stretching_child_tables() -> None:
+def test_table_view_stretches_child_dict_tables_within_sequence_cells() -> None:
     import re
 
     value = {
@@ -280,16 +349,30 @@ def test_table_view_sizes_sequence_of_dicts_without_stretching_child_tables() ->
     }
     _, graph = build_graph_view(value, "data", ViewKind.TABLE, 3, item_limit=10)
 
-    header = graph.nodes["table_header_data"].label
     users_row = graph.nodes["table_row_data_users"].label
 
-    header_widths = re.findall(r"(?:WIDTH|width)='(\d+)'", header)
-    header_value_width = int(header_widths[-1]) if header_widths else 0
-    child_dict_value_widths = [int(width) for width in re.findall(r"<td width='(\d+)' align='center' cellpadding='4'><font point-size=\"12\" color=\"#0f172a\">[12]</font></td>", users_row)]
+    child_table_widths = re.findall(
+        r"<td width='194' align='center' bgcolor='#ffffff' cellpadding='2'><table[^>]*WIDTH='(\d+)'",
+        users_row,
+    )
 
-    assert header_value_width > 368
-    assert child_dict_value_widths
-    assert all(width < header_value_width for width in child_dict_value_widths)
+    assert child_table_widths == ["186", "186"]
+
+
+def test_table_view_centers_nested_container_stubs() -> None:
+    value = {
+        "users": [
+            {"id": 1, "tags": ["a", "b"]},
+            {"id": 2, "tags": ["z", "d"]},
+        ],
+        "meta": {"page": 1, "total": 2},
+    }
+    _, graph = build_graph_view(value, "data", ViewKind.TABLE, 3, item_limit=10)
+
+    users_row = graph.nodes["table_row_data_users"].label
+
+    assert "list len=2" in users_row
+    assert "<td width='94' align='center' cellpadding='2'><font point-size=\"12\" color=\"#475569\">list len=2</font></td>" in users_row
 
 
 def test_table_view_stretches_sequence_of_dicts_to_the_available_value_width() -> None:
@@ -306,7 +389,7 @@ def test_table_view_stretches_sequence_of_dicts_to_the_available_value_width() -
 
     users_row = graph.nodes["table_row_data_users"].label
     direct_cell_widths = re.findall(
-        r"<td width='(\d+)' align='center' bgcolor='#ffffff' cellpadding='4'><table",
+        r"<td width='(\d+)' align='center' bgcolor='#ffffff' cellpadding='2'><table",
         users_row,
     )
     index_widths = re.findall(
@@ -314,8 +397,51 @@ def test_table_view_stretches_sequence_of_dicts_to_the_available_value_width() -
         users_row,
     )
 
-    assert direct_cell_widths == ["196", "196"]
-    assert index_widths == ["196", "196"]
+    assert direct_cell_widths == ["194", "194"]
+    assert index_widths[-2:] == ["194", "194"]
+
+
+def test_table_view_normalizes_list_of_dict_sibling_column_widths() -> None:
+    import re
+
+    value = {
+        "users": [
+            {"id": 1, "tags": ["a", "b"]},
+            {"id": {"1": 2}, "tags": ["z", "d"]},
+        ],
+        "meta": {"page": 1, "total": 2},
+    }
+    _, graph = build_graph_view(value, "data", ViewKind.TABLE, 3, item_limit=10)
+
+    users_row = graph.nodes["table_row_data_users"].label
+    id_value_widths = re.findall(
+        r"<tr><td width='92' align='center'>id</td><td width='(\d+)' align='center' cellpadding='2'>",
+        users_row,
+    )
+
+    assert id_value_widths == ["140", "140"]
+    assert "dict keys=1" in users_row
+    assert ">tags</td><td width='140' align='center' cellpadding='2'><font point-size=\"12\" color=\"#475569\">list len=2</font></td>" in users_row
+
+
+def test_table_view_recursively_fits_deeper_nested_sequences() -> None:
+    value = {
+        "users": [
+            {"id": 1, "tags": ["a", "b"]},
+            {"id": {"1": 2}, "tags": ["z", "d"]},
+        ],
+        "meta": {"page": 1, "total": 2},
+    }
+    _, graph = build_graph_view(value, "data", ViewKind.TABLE, 5, item_limit=10)
+
+    users_row = graph.nodes["table_row_data_users"].label
+
+    assert "cv-data-users-0--tags-wrapper' border='0' cellborder='0' cellspacing='0' WIDTH='140'" in users_row
+    assert "cv-data-users-0--tags-value-table' border='1' cellborder='1' cellspacing='0' WIDTH='140'" in users_row
+    assert "cv-data-users-0--tags-index-row'><td width='70' align='center'><font color='#dc2626' point-size='12'>0</font>" in users_row
+    assert "cv-data-users-1--tags-wrapper' border='0' cellborder='0' cellspacing='0' WIDTH='140'" in users_row
+    assert "cv-data-users-1--tags-value-table' border='1' cellborder='1' cellspacing='0' WIDTH='140'" in users_row
+    assert "cv-data-users-1--tags-index-row'><td width='70' align='center'><font color='#dc2626' point-size='12'>0</font>" in users_row
 
 
 def test_tree_view_preserves_node_identity_when_children_swap() -> None:

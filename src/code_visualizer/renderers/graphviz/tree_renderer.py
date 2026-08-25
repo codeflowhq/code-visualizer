@@ -9,6 +9,10 @@ from ...utils.detection.tree import _tree_children
 from ..html.tables import _format_value_label
 
 
+def _is_binary_tree_node(node: Any) -> bool:
+    return hasattr(node, "left") or hasattr(node, "right")
+
+
 @dataclass
 class _TreeBuilder:
     graph: VisualGraph
@@ -32,10 +36,11 @@ class _TreeBuilder:
             return hashlib.blake2s(payload.encode("utf-8"), digest_size=8).hexdigest()
 
         raw_label, children = info
-        child_signatures = ",".join(
-            sorted(self.subtree_signature(child) for child in children)
-        )
-        payload = f"tree|{type(node).__name__}|{raw_label!r}|{child_signatures}"
+        child_signatures = [self.subtree_signature(child) for child in children]
+        if not _is_binary_tree_node(node):
+            child_signatures.sort()
+        child_signature_payload = ",".join(child_signatures)
+        payload = f"tree|{type(node).__name__}|{raw_label!r}|{child_signature_payload}"
         return hashlib.blake2s(payload.encode("utf-8"), digest_size=8).hexdigest()
 
     def node_signature(self, node: Any) -> str:
@@ -92,6 +97,7 @@ def build_tree(
 ) -> tuple[str, VisualGraph]:
     del name
     graph = VisualGraph()
+    graph.graph_attrs["ordering"] = "out"
     builder = _TreeBuilder(
         graph=graph, nested_depth=nested_depth, max_items=max_items, max_nodes=max_nodes
     )

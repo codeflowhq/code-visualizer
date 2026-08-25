@@ -23,6 +23,7 @@ from .rendering import (
     visualize_trace,
     visualize_traces,
 )
+from .step_tracer_compat import patch_step_tracer_models
 from .types import (
     RenderedTraceFrame,
     TraceManifest,
@@ -66,6 +67,7 @@ def _ensure_tracer(instance: StepTracer | None) -> StepTracer:
             "`pip install git+https://github.com/edcraft-org/step-tracer.git` "
             "and `pip install git+https://github.com/edcraft-org/query-engine.git`."
         )
+    patch_step_tracer_models()
     return StepTracer()
 
 

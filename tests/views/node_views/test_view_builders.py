@@ -40,6 +40,19 @@ def test_array_node_builder_uses_equal_outer_cell_size_for_nested_list() -> None
     assert "width='222' height='64' fixedsize='true'" in nested_label
 
 
+def test_array_node_builder_renders_frameless_red_index_row() -> None:
+    _, graph = build_graph_view(
+        [None, None, None], "data", ViewKind.ARRAY_CELLS, 2, item_limit=10
+    )
+
+    label = graph.nodes["arr_item_data_None_0"].label
+
+    assert "color='#dc2626'" in label
+    assert "point-size='12'" in label
+    assert "<table border='0' cellborder='0' cellspacing='0' cellpadding='0'>" in label
+    assert "<table border='1' cellborder='1' cellspacing='0' cellpadding='0'>" in label
+
+
 def test_array_node_builder_expands_dict_items_inline() -> None:
     users = [{"id": 1, "tags": ["a", "b"]}, {"id": 2, "tags": ["c", "d"]}]
     _, graph = build_graph_view(
